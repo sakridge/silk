@@ -75,6 +75,8 @@ pub fn responder(
 
 //TODO, we would need to stick block authentication before we create the
 //window.
+// detect erasure packet
+// detect packet to send to peer
 fn recv_window(
     window: &mut Vec<Option<SharedBlob>>,
     recycler: &BlobRecycler,
@@ -129,7 +131,7 @@ pub fn window(
         sock.set_read_timeout(Some(timer)).unwrap();
         loop {
             if recv_window(&mut window, &r, &mut consumed, &sock, &s).is_err()
-                || exit.load(Ordering::Relaxed)
+                && exit.load(Ordering::Relaxed)
             {
                 break;
             }
@@ -152,6 +154,9 @@ mod bench {
     use std::time::Duration;
     use std::time::SystemTime;
     use streamer::{receiver, PacketReceiver};
+
+    use streamer::{allocate, recycle, Packet, PacketRecycler, Receiver};
+    use packet::PACKET_SIZE;
 
     fn producer(
         addr: &SocketAddr,
