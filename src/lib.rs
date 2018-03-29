@@ -14,6 +14,7 @@ pub mod result;
 pub mod signature;
 pub mod streamer;
 pub mod transaction;
+pub mod gpu;
 extern crate bincode;
 extern crate chrono;
 extern crate generic_array;

@@ -4,9 +4,10 @@
 
 extern crate libc;
 
-use hash::Hash;
+use chrono::prelude::*;
 use entry::Entry;
 use event::Event;
+use hash::Hash;
 use historian::Historian;
 use mint::Mint;
 use plan::{Plan, Witness};
@@ -17,17 +18,23 @@ use std::collections::{HashMap, HashSet};
 use std::result;
 use std::sync::mpsc::SendError;
 use transaction::Transaction;
-use chrono::prelude::*;
 
 use self::libc::size_t;
 use std::mem::size_of;
 
 #[link(name = "cuda_verify_ed25519")]
-extern {
-    fn ed25519_verify_many(packets: *const u8, packet_lens: *const u32, packet_offsets: *const u32,
-                           message_lens: *const u32, message_offsets: *const u32,
-                           public_key_offset: u32, signature_offset: u32,
-                           num_keys: size_t, out: *mut u8) -> u32;
+extern "C" {
+    fn ed25519_verify_many(
+        packets: *const u8,
+        packet_lens: *const u32,
+        packet_offsets: *const u32,
+        message_lens: *const u32,
+        message_offsets: *const u32,
+        public_key_offset: u32,
+        signature_offset: u32,
+        num_keys: size_t,
+        out: *mut u8,
+    ) -> u32;
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -39,9 +46,9 @@ pub enum AccountingError {
 }
 
 macro_rules! offset_of {
-    ($ty:ty, $field:ident) => {
+    ($ty: ty, $field: ident) => {
         unsafe { &(*(0 as *const $ty)).$field as *const _ as usize }
-    }
+    };
 }
 
 pub type Result<T> = result::Result<T, AccountingError>;
@@ -108,42 +115,6 @@ impl Accountant {
         } else {
             false
         }
-    }
-
-    pub fn process_packets(self: &mut Self, trs: &[Transaction]) {
-
-        println!("Starting verify num packets: {}", trs.len());
-        if trs.len() == 0 {
-            return;
-        }
-
-        let len = trs.len();
-        let mut packet_lens : Vec<u32> = vec![0; len];
-        let mut packet_offsets : Vec<u32> = vec![0; len];
-        let mut message_offsets : Vec<u32> = vec![0; len];
-        let mut message_lens : Vec<u32> = vec![0; len];
-        let signature_offset: u32 = offset_of!(Transaction, sig) as u32;
-        let public_key_offset: u32 = offset_of!(Transaction, from) as u32;
-        let num_keys: size_t = trs.len();
-        let mut out: Vec<u8> = Vec::with_capacity(len);
-        println!("lens: {}", packet_lens.len());
-        for (i, _tr) in trs.iter().enumerate() {
-            packet_lens[i] = size_of::<Transaction>() as u32;
-            packet_offsets[i] = (i * size_of::<Transaction>()) as u32;
-            message_offsets[i] = offset_of!(Transaction, plan) as u32;
-            message_lens[i] = (offset_of!(Transaction, sig) - offset_of!(Transaction, plan)) as u32;
-        }
-        println!("Starting verify num packets: {}", trs.len());
-        unsafe {
-            let res = ed25519_verify_many(trs.as_ptr() as *const u8,//std::mem::transmute::<&[Transaction], &[u8]>(trs),
-                                          packet_lens.as_ptr(), packet_offsets.as_ptr(),
-                                          message_lens.as_ptr(), message_offsets.as_ptr(),
-                                          public_key_offset, signature_offset, num_keys,
-                                          out.as_mut_ptr());
-            if res != 0 {
-            }
-        }
-        println!("done verify");
     }
 
     pub fn process_transaction(self: &mut Self, tr: Transaction) -> Result<()> {

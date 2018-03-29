@@ -59,9 +59,9 @@ impl<W: Write + Send + 'static> AccountantSkel<W> {
         self.last_id
     }
 
-    pub fn process_request(self: &mut Self, msg: Request) -> Option<Response> {
+    pub fn process_request(self: &mut Self, msg: Request, verify: u8) -> Option<Response> {
         match msg {
-            Request::Transaction(tr) => {
+            Request::Transaction(tr) if verify != 0 => {
                 if let Err(err) = self.acc.process_transaction(tr) {
                     eprintln!("Transaction error: {:?}", err);
                 }
@@ -92,56 +92,62 @@ impl<W: Write + Send + 'static> AccountantSkel<W> {
             }),
         }
     }
+
+    fn verifier(
+        recv: &streamer::Receiver,
+        send: &channel::Sender<(Vec<streamer::SharedPackets>, Vec<Vec<u8>>)>,
+    ) -> Result<()> {
+        let timer = Duration::new(1, 0);
+        let msgs = recv.recv_timeout(timer)?;
+        let msgs_ = msgs.clone();
+        let v = Vec::new();
+        v.push(msgs);
+        while let Some(more) = recv.try_recv() {
+            v.push(more);
+        }
+        let rvs = gpu::ecdsa_verify(&v);
+        send.send(v, rvs);
+    }
+
     fn process(
         &mut self,
-        r_reader: &streamer::Receiver,
+        r_reader: &channel::Receiver<(Vec<streamer::SharedPackets>, Vec<Vec<u8>>)>,
         s_responder: &streamer::Responder,
         packet_recycler: &streamer::PacketRecycler,
         response_recycler: &streamer::ResponseRecycler,
     ) -> Result<()> {
         let timer = Duration::new(1, 0);
-        let msgs = r_reader.recv_timeout(timer)?;
-        let msgs_ = msgs.clone();
-        let rsps = streamer::allocate(response_recycler);
-        let rsps_ = rsps.clone();
-        {
-            let mut num = 0;
-            let mut ursps = rsps.write().unwrap();
-            let mut transactions = Vec::new();
-            println!("here!");
-            for packet in msgs.read().unwrap().packets.iter() {
-                let sz = packet.meta.size;
-                let req = deserialize(&packet.data[0..sz])?;
-                match req {
-                    Request::Transaction(tr) => {
-                        transactions.push(tr);
+        let batches = r_reader.recv_timeout(timer)?;
+        for (msgs, verifies) in batches {
+            let msgs_ = msgs.clone();
+            let rsps = streamer::allocate(response_recycler);
+            let rsps_ = rsps.clone();
+            {
+                let mut num = 0;
+                let mut ursps = rsps.write().unwrap();
+                for (packet, v) in &msgs.read().unwrap().packets.iter().zip(verifies) {
+                    let sz = packet.meta.size;
+                    let req = deserialize(&packet.data[0..sz])?;
+                    if let Some(resp) = self.process_request(req, v) {
+                        if ursps.responses.len() <= num {
+                            ursps
+                                .responses
+                                .resize((num + 1) * 2, streamer::Response::default());
+                        }
+                        let rsp = &mut ursps.responses[num];
+                        let v = serialize(&resp)?;
+                        let len = v.len();
+                        rsp.data[..len].copy_from_slice(&v);
+                        rsp.meta.size = len;
+                        rsp.meta.set_addr(&packet.meta.get_addr());
+                        num += 1;
                     }
-                    _ => { }
                 }
+                ursps.responses.resize(num, streamer::Response::default());
             }
-            self.acc.process_packets(&transactions);
-            for packet in &msgs.read().unwrap().packets {
-                let sz = packet.meta.size;
-                let req = deserialize(&packet.data[0..sz])?;
-                if let Some(resp) = self.process_request(req) {
-                    if ursps.responses.len() <= num {
-                        ursps
-                            .responses
-                            .resize((num + 1) * 2, streamer::Response::default());
-                    }
-                    let rsp = &mut ursps.responses[num];
-                    let v = serialize(&resp)?;
-                    let len = v.len();
-                    rsp.data[..len].copy_from_slice(&v);
-                    rsp.meta.size = len;
-                    rsp.meta.set_addr(&packet.meta.get_addr());
-                    num += 1;
-                }
-            }
-            ursps.responses.resize(num, streamer::Response::default());
+            s_responder.send(rsps_)?;
+            streamer::recycle(packet_recycler, msgs_);
         }
-        s_responder.send(rsps_)?;
-        streamer::recycle(packet_recycler, msgs_);
         Ok(())
     }
 
