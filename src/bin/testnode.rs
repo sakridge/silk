@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 
 fn main() {
     env_logger::init().unwrap();
-    let addr = "127.0.0.1:9000";
+    let addr = "192.168.88.253:9000";
     let stdin = io::stdin();
     let mut entries = stdin
         .lock()

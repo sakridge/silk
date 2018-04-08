@@ -13,7 +13,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 fn main() {
-    let addr = "127.0.0.1:9000";
+    let addr = "192.168.88.253:9000";
     let send_addr = "127.0.0.1:9001";
 
     let mint: Mint = serde_json::from_reader(stdin()).unwrap();
