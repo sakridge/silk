@@ -17,6 +17,7 @@ pub mod signature;
 pub mod streamer;
 pub mod transaction;
 pub mod subscriptions;
+pub mod erasure;
 extern crate bincode;
 extern crate byteorder;
 extern crate chrono;
