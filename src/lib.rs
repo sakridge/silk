@@ -37,3 +37,5 @@ extern crate untrusted;
 #[cfg(test)]
 #[macro_use]
 extern crate matches;
+
+extern crate rand;

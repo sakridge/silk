@@ -90,6 +90,8 @@ fn recv_window(
         let mut p = b.write().unwrap();
         let pix = p.get_index()? as usize;
         let w = pix % NUM_BLOBS;
+        println!("w: {} b: {:?} NUM_BLOBS: {} window.len: {}",
+                 w, p, NUM_BLOBS, window.len());
         //TODO, after the block are authenticated
         //if we get different blocks at the same index
         //that is a network failure/attack
@@ -111,6 +113,7 @@ fn recv_window(
                 *consumed += 1;
             }
             if !dq.is_empty() {
+                println!("sending {}", dq.len());
                 s.send(dq)?;
             }
         }
@@ -256,6 +259,7 @@ mod test {
     use std::sync::Arc;
     use std::time::Duration;
     use streamer::{receiver, responder, window, BlobReceiver, PacketReceiver};
+    use rand::{Rng, thread_rng};
 
     fn get_msgs(r: PacketReceiver, num: &mut usize) {
         for _t in 0..5 {
@@ -312,6 +316,7 @@ mod test {
             match r.recv_timeout(timer) {
                 Ok(m) => {
                     for (i, v) in m.iter().enumerate() {
+                        println!("i: {} v: {:?}", i, v.read().unwrap());
                         assert_eq!(v.read().unwrap().get_index().unwrap() as usize, *num + i);
                     }
                     *num += m.len();
@@ -355,4 +360,49 @@ mod test {
         t_receiver.join().expect("join");
         t_responder.join().expect("join");
     }
+
+    #[test]
+    pub fn window_missing_packets() {
+        let read = UdpSocket::bind("127.0.0.1:0").expect("bind");
+        let addr = read.local_addr().unwrap();
+        let send = UdpSocket::bind("127.0.0.1:0").expect("bind");
+        let exit = Arc::new(AtomicBool::new(false));
+        let resp_recycler = BlobRecycler::default();
+        let (s_reader, r_reader) = channel();
+        let t_receiver = window(read, exit.clone(), resp_recycler.clone(), s_reader);
+        let (s_responder, r_responder) = channel();
+        let t_responder = responder(send, exit.clone(), resp_recycler.clone(), r_responder);
+        let mut msgs = VecDeque::new();
+        let num_send: u64 = 10;
+        let mut sends: &[u64] = &[0; 10];
+        for (i, mut x) in sends.iter().enumerate() {
+            *x = i as u64;
+        }
+        {
+            let mut rng = thread_rng();
+            for (i, v) in sends.iter().enumerate() {
+                let x: usize = rng.gen_range(0, num_send as usize);
+                sends.swap(i, x);
+            }
+        }
+        for v in sends.iter() {
+            let i = num_send - 1 - *v;
+            let b = resp_recycler.allocate();
+            let b_ = b.clone();
+            let mut w = b.write().unwrap();
+            w.set_index(i).unwrap();
+            assert_eq!(i, w.get_index().unwrap());
+            w.meta.size = PACKET_DATA_SIZE;
+            w.meta.set_addr(&addr);
+            msgs.push_back(b_);
+        }
+        s_responder.send(msgs).expect("send");
+        let mut num = 0;
+        get_blobs(r_reader, &mut num);
+        assert_eq!(num, num_send as usize);
+        exit.store(true, Ordering::Relaxed);
+        t_receiver.join().expect("join");
+        t_responder.join().expect("join");
+    }
+
 }
