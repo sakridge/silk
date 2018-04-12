@@ -8,6 +8,9 @@ use std::sync::Arc;
 use std::thread::{spawn, JoinHandle};
 use std::time::Duration;
 
+use erasure;
+use packet::BLOB_SIZE;
+
 pub type PacketReceiver = mpsc::Receiver<SharedPackets>;
 pub type PacketSender = mpsc::Sender<SharedPackets>;
 pub type BlobSender = mpsc::Sender<VecDeque<SharedBlob>>;
@@ -84,6 +87,9 @@ fn recv_window(
     socket: &UdpSocket,
     s: &BlobSender,
 ) -> Result<()> {
+    const HIST_BUCKET_SIZE:usize = 4;
+    const NUM_CODING_BLOCKS:usize = 1;
+    let mut window_hist = vec![0; window.len()/HIST_BUCKET_SIZE];
     let mut dq = Blob::recv_from(recycler, socket)?;
     while let Some(b) = dq.pop_front() {
         let b_ = b.clone();
@@ -98,8 +104,60 @@ fn recv_window(
         {
             if window[w].is_none() {
                 window[w] = Some(b_);
+                let window_hist_idx = w % window_hist.len();
+                window_hist[window_hist_idx] += 1;
             } else {
                 debug!("duplicate blob at index {:}", w);
+            }
+
+            let num_non_coding = HIST_BUCKET_SIZE - NUM_CODING_BLOCKS;
+            for (i, hist_val) in window_hist.iter().enumerate() {
+                let coding_start = i+num_non_coding;
+                let coding_end = coding_start + NUM_CODING_BLOCKS;
+                // see if we have not all blocks in a bucket
+                // but a minimum number to re-generate from coding
+                if *hist_val != HIST_BUCKET_SIZE &&
+                   *hist_val > (num_non_coding) {
+                    // detect if we have non-null coding entries, if we do
+                    // then we should use the coding blocks to decode
+                    for j in coding_start..coding_end {
+                        if !window[j].is_none() {
+                            let mut erasures:Vec<i32> = Vec::new();
+                            let mut data:Vec<Vec<u8>> = Vec::new();
+                            let mut coding:Vec<Vec<u8>> = Vec::new();
+                            let mut locks = Vec::new();
+                            let mut locksprime = Vec::new();
+                            for k in i..coding_end {
+                                if !window[k].is_none() {
+                                    locks[k] = window[k].clone().unwrap();
+                                    locksprime[k] = Some(locks[k].read().unwrap());
+                                }
+                            }
+                            for k in i..coding_start {
+                                if locksprime[k].is_none() {
+                                    data.push(vec![0; BLOB_SIZE]);
+                                    erasures.push(k as i32);
+                                } else {
+                                    //data.push((*window[k].clone().unwrap().read().unwrap()).data.to_vec());
+                                    data.push((locksprime[k].unwrap().clone()).data.to_vec());
+                                }
+                            }
+                            /*for k in coding_start..coding_end {
+                                if window[k].is_none() {
+                                    coding.push(vec![0; BLOB_SIZE]);
+                                    erasures.push(k as i32);
+                                } else {
+                                    coding.push((*window[k].clone().unwrap().read().unwrap()).data.to_vec());
+                                }
+                            }*/
+                            erasures.push(-1);
+                            erasure::decode_blocks(&data,
+                                                   &coding,
+                                                   &erasures);
+                            break;
+                        }
+                    }
+                }
             }
             //send a contiguous set of blocks
             let mut dq = VecDeque::new();
@@ -374,17 +432,19 @@ mod test {
         let t_responder = responder(send, exit.clone(), resp_recycler.clone(), r_responder);
         let mut msgs = VecDeque::new();
         let num_send: u64 = 10;
-        let mut sends: &[u64] = &[0; 10];
-        for (i, mut x) in sends.iter().enumerate() {
-            *x = i as u64;
+        let mut sends = [0; 9];
+        for i in 0..sends.len() {
+            sends[i as usize] = (i+1) as u64;
         }
+        println!("sends: {:?}", sends);
         {
             let mut rng = thread_rng();
-            for (i, v) in sends.iter().enumerate() {
-                let x: usize = rng.gen_range(0, num_send as usize);
+            for i in 0..sends.len() {
+                let x: usize = rng.gen_range(0, (num_send-1) as usize);
                 sends.swap(i, x);
             }
         }
+        println!("sends: {:?}", sends);
         for v in sends.iter() {
             let i = num_send - 1 - *v;
             let b = resp_recycler.allocate();

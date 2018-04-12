@@ -7,15 +7,15 @@ use std::os::raw::c_char;
 extern "C" {
     fn jerasure_matrix_encode(k: i32, m: i32, w: i32,
                               matrix: *const i32,
-                              data_ptrs: *const *const c_char,
-                              coding_ptrs: *const *const c_char,
+                              data_ptrs: *const *const u8,
+                              coding_ptrs: *const *const u8,
                               size: i32);
     fn jerasure_matrix_decode(k: i32, m: i32, w: i32,
                               matrix: *const i32,
                               row_k_ones: i32,
                               erasures: *const i32,
-                              data_ptrs: *const *const c_char,
-                              coding_ptrs: *const *const c_char,
+                              data_ptrs: *const *const u8,
+                              coding_ptrs: *const *const u8,
                               size: i32) -> i32;
     fn galois_single_divide(a: i32, b: i32, w: i32) -> i32;
 }
@@ -34,10 +34,10 @@ fn get_matrix(m: i32, k: i32, w: i32) -> Vec<i32> {
 
 pub const ERASURE_W: i32 = 32;
 
-pub fn generate_coding_blocks(data: &[Vec<i8>], m: i32) -> Vec<Vec<i8>> {
+pub fn generate_coding_blocks(data: &[Vec<u8>], m: i32) -> Vec<Vec<u8>> {
     let matrix: Vec<i32> = get_matrix(m, data.len() as i32, ERASURE_W);
     let mut vs = Vec::new();
-    let mut coding_arg: Vec<*const i8> = Vec::new();
+    let mut coding_arg: Vec<*const u8> = Vec::new();
     let mut data_arg = Vec::new();
     for _ in 0..m {
         let v = vec![0; data[0].len()];
@@ -62,10 +62,10 @@ pub fn generate_coding_blocks(data: &[Vec<i8>], m: i32) -> Vec<Vec<i8>> {
     vs
 }
 
-pub fn decode_blocks(data: &[Vec<i8>], coding: &[Vec<i8>], erasures: &[i32]) {
+pub fn decode_blocks(data: &[Vec<u8>], coding: &[Vec<u8>], erasures: &[i32]) {
     let matrix: Vec<i32> = get_matrix(coding.len() as i32, data.len() as i32, ERASURE_W);
-    let mut coding_arg: Vec<*const i8> = Vec::new();
-    let mut data_arg: Vec<*const i8> = Vec::new();
+    let mut coding_arg: Vec<*const u8> = Vec::new();
+    let mut data_arg: Vec<*const u8> = Vec::new();
     for x in coding.iter() {
         coding_arg.push(x.as_ptr());
     }
