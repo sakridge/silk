@@ -17,9 +17,16 @@
 /// * receiver, gets upstream data, and fetches missing packets from peers and parents
 /// * peer_server, that accepts requests from peers and children data
 
-use hash::Hash;
-use entry::Entry;
 use signature::PublicKey;
+use bincode::{deserialize};
+use std::net::{SocketAddr, UdpSocket};
+use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use rand::{Rng, thread_rng};
+use std::sync::RwLock;
+use std::sync::mpsc::{Receiver, Sender};
+use packet::PacketData;
+use result::Result;
 
 /// use A/100 amount of bandwidth to reed solomon code the output
 const CODES: u64 = 256;
@@ -35,6 +42,7 @@ struct Subscription {
     stake: Amount,
     addr: SocketAddr,
 }
+
 pub type SharedPacketData = Arc<RwLock<PacketData>>;
 pub type Cache = Arc<Mutex<Vec<SharedPacketData>>>;
 
@@ -42,40 +50,73 @@ struct Subscriptions {
     recycler: Cache,
     window: Cache,
     heap: SubscriptionHeap,
-    me: Publickey,
+    me: PublicKey,
 }
 
-fn heap_update(subs: SubscriptionHeap, Subscription) {
+fn heap_update(subs: SubscriptionHeap, sub: Subscription) {
 }
-fn is_child(subs: SubscriptionHeap, PublicKey) -> bool {
+
+fn is_child(subs: SubscriptionHeap, pubkey: PublicKey) -> bool {
+    true
 }
-fn is_peer(subs: SubscriptionHeap, PublicKey) -> bool {
+
+fn is_peer(subs: SubscriptionHeap, pubkey: PublicKey) -> bool {
+    true
 }
-fn get_peers(subs: SubscriptionHeap, PublicKey) -> Vec<Subscription> {
+
+fn get_peers(subs: SubscriptionHeap, pubkey: PublicKey) -> Vec<Subscription> {
+    vec![]
 }
-fn get_children(subs: SubscriptionHeap, PublicKey) -> Vec<Subscription> {
+
+fn get_children(subs: SubscriptionHeap, pubkey: PublicKey) -> Vec<Subscription> {
+    vec![]
+}
+
+fn get_parents(subs: SubscriptionHeap, pubkey: PublicKey) -> Vec<Subscription> {
+    vec![]
+}
+
+fn get_index(subs: SubscriptionHeap, pubkey: PublicKey) -> usize {
+    return 0;
 }
 
 impl Subscriptions {
+    fn peers(&self) -> Vec<Subscription> {
+        get_peers(self.heap, self.me)
+    }
+
+    fn parents(&self) -> Vec<Subscription> {
+        get_parents(self.heap, self.me)
+    }
+
+    fn children(&self) -> Vec<Subscription> {
+        get_children(self.heap, self.me)
+    }
+
+    fn my_peer_index(&self) -> usize {
+        get_index(self.heap, self.me)
+    }
+
     /// Assume all the peers are sending to all the children
     /// Broadcast to as many children as you can, avoid sending duplicates
-    pub fn broadcast(&self, sock: UdpSocket, r: Receiver<ShardPacketData>) -> Result<()> {
+    pub fn broadcast(&self, sock: UdpSocket, r: Receiver<SharedPacketData>) -> Result<()> {
         let packets = r.recv_timeout(Duration::new(1, 0))?;
-        self.window_push(packets);
+        self.window.write().push(packets);
         let peers = self.peers();
         let me = self.my_peer_index();
         let children = self.children();
         for p in packets.iter() {
             p.send_to(sock, children[(p.index() + me) % children.len()]);
         }
+        Ok(())
     }
 
     /// Wait for a block of packets to be filled and then send it through the channel.
     /// Check the min number necessary to reconstruct the data set
     /// randomly ask a peer or parent for the missing packets in random order
-    pub fn receiver(&self, r: streamer::Receiver, s: streamer::Sender)-> Result<()> {
+    pub fn receiver(&self, r: Receiver<SharedPacketData>, s: Sender<SharedPacketData>)-> Result<()> {
         let mut packets = self.window_peek();
-        let required = (* 100) / FANOUT;
+        //let required = (* 100) / FANOUT;
         loop {
             packets.fill_packets(s)?;
             let t = (FANOUT - CODES) * packets.len();
@@ -84,8 +125,9 @@ impl Subscriptions {
                 break;
             }
             let mut num = packets.num_valid() - min_needed;
-            let c = self.peers() + self.parents();
-            for ix in shuffle(0..packets.len()) {
+            let c = self.peers().extend(self.parents());
+            let mut rng = thread_rng();
+            for ix in rng.shuffle(0..packets.len()) {
                 if num == 0 {
                     break;
                 }
@@ -93,13 +135,14 @@ impl Subscriptions {
                 if p.valid() {
                     continue;
                 }
-                let r = c[random(0, c.len())];
+                let r = c[rng.gen_range(0, c.len())];
                 s.send_to(r, p.request());
-                num--;
+                num -= 1;
             }
         }
         let done = self.window_pop()?;
         s.send(done);
+        Ok(())
     }
     /// Assume all the peers are sending to all the children
     /// Broadcast to as many children as you can, avoid sending duplicates
@@ -135,14 +178,17 @@ impl Subscriptions {
             }
             p.transmitted = true;
         }
+        Ok(())
     }
+
     /// Wait for requests form peers, then respond to them
-    pub fn peer_server(&self, s: UdpSocket, request: Reciever<SharedPacketData>) -> Result<()> {
-        requests.recv(s)?;
+    pub fn peer_server(&self, s: UdpSocket, requests: Receiver<SharedPacketData>) -> Result<()> {
+        requests.recv()?;
         for r in requests.iter() {
-            let req = deserialize(r.data[0..r.len]);
+            let req = deserialize(r.data[0..r.len()]);
             let packet = self.window_lookup(req);
             packet.send_to(r.get_addr());
         }
+        Ok(())
     }
 }
