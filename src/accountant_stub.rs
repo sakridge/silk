@@ -97,6 +97,9 @@ mod tests {
     use std::thread::sleep;
     use std::time::Duration;
 
+    use subscribers::{Node, Subscribers};
+    use std::sync::RwLock;
+
     // TODO: Figure out why this test sometimes hangs on TravisCI.
     #[test]
     fn test_accountant_stub() {
@@ -113,7 +116,13 @@ mod tests {
             sink(),
             historian,
         )));
-        let _threads = AccountantSkel::serve(&acc, addr, exit.clone()).unwrap();
+
+        let node_me = Node::default();
+        let node_leader = Node::default();
+        let rsubs = Subscribers::new(node_me, node_leader, &[]);
+        let subs = Arc::new(RwLock::new(rsubs));
+
+        let _threads = AccountantSkel::serve(&acc, addr, subs, exit.clone()).unwrap();
         sleep(Duration::from_millis(300));
 
         let socket = UdpSocket::bind(send_addr).unwrap();

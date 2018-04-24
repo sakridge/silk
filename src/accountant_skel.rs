@@ -31,6 +31,9 @@ use transaction::Transaction;
 use subscribers;
 use std::mem::size_of;
 
+pub type EntrySender = Sender<Entry>;
+pub type EntryReceiver = Receiver<Entry>;
+
 pub struct AccountantSkel<W: Write + Send + 'static> {
     acc: Accountant,
     last_id: Hash,
@@ -75,11 +78,12 @@ impl<W: Write + Send + 'static> AccountantSkel<W> {
     }
 
     /// Process any Entry items that have been published by the Historian.
-    pub fn sync(&mut self) -> Hash {
+    pub fn sync(&mut self, entry_sender: &EntrySender) -> Hash {
         while let Ok(entry) = self.historian.receiver.try_recv() {
             self.last_id = entry.id;
             self.acc.register_entry_id(&self.last_id);
             writeln!(self.writer, "{}", serde_json::to_string(&entry).unwrap()).unwrap();
+            entry_sender.send(entry).expect("sending failed!");
         }
         self.last_id
     }
@@ -89,13 +93,14 @@ impl<W: Write + Send + 'static> AccountantSkel<W> {
         &mut self,
         msg: Request,
         rsp_addr: SocketAddr,
+        entry_sender: &EntrySender,
     ) -> Option<(Response, SocketAddr)> {
         match msg {
             Request::GetBalance { key } => {
                 let val = self.acc.get_balance(&key);
                 Some((Response::Balance { key, val }, rsp_addr))
             }
-            Request::GetLastId => Some((Response::LastId { id: self.sync() }, rsp_addr)),
+            Request::GetLastId => Some((Response::LastId { id: self.sync(entry_sender) }, rsp_addr)),
             Request::Transaction(_) => unreachable!(),
         }
     }
@@ -170,6 +175,7 @@ impl<W: Write + Send + 'static> AccountantSkel<W> {
     fn process_packets(
         &mut self,
         req_vers: Vec<(Request, SocketAddr, u8)>,
+        entry_sender: &EntrySender,
     ) -> Result<Vec<(Response, SocketAddr)>> {
         let (trs, reqs) = Self::partition_requests(req_vers);
 
@@ -188,7 +194,7 @@ impl<W: Write + Send + 'static> AccountantSkel<W> {
 
         // Process the remaining requests serially.
         let rsps = reqs.into_iter()
-            .filter_map(|(req, rsp_addr)| self.process_request(req, rsp_addr))
+            .filter_map(|(req, rsp_addr)| self.process_request(req, rsp_addr, entry_sender))
             .collect();
 
         Ok(rsps)
@@ -228,6 +234,7 @@ impl<W: Write + Send + 'static> AccountantSkel<W> {
         blob_sender: &streamer::BlobSender,
         packet_recycler: &packet::PacketRecycler,
         blob_recycler: &packet::BlobRecycler,
+        entry_sender: &EntrySender,
     ) -> Result<()> {
         let timer = Duration::new(1, 0);
         let mms = verified_receiver.recv_timeout(timer)?;
@@ -238,7 +245,7 @@ impl<W: Write + Send + 'static> AccountantSkel<W> {
                 .filter_map(|(req, ver)| req.map(|(msg, addr)| (msg, addr, ver)))
                 .filter(|x| x.0.verify())
                 .collect();
-            let rsps = obj.lock().unwrap().process_packets(req_vers)?;
+            let rsps = obj.lock().unwrap().process_packets(req_vers, entry_sender)?;
             let blobs = Self::serialize_responses(rsps, blob_recycler)?;
             if !blobs.is_empty() {
                 //don't wake up the other side if there is nothing
@@ -275,6 +282,19 @@ impl<W: Write + Send + 'static> AccountantSkel<W> {
         Ok(())
     }
 
+    pub fn leader_replicate_state_to_level1(
+            obj: &Arc<Mutex<AccountantSkel<W>>>,
+            processed_entry_receiver: &EntryReceiver,
+            subs: &Arc<RwLock<subscribers::Subscribers>>,
+            ) -> Result<()> {
+        let timer = Duration::new(1, 0);
+        let entry = processed_entry_receiver.recv_timeout(timer)?;
+        println!("entry: {:?}", entry);
+        let socket = UdpSocket::bind(subs[0].addr)?;
+        socket.write();
+
+        Ok(())
+    }
 
     /// Create a UDP microservice that forwards messages the given AccountantSkel.
     /// This service is the network leader
@@ -282,6 +302,7 @@ impl<W: Write + Send + 'static> AccountantSkel<W> {
     pub fn serve(
         obj: &Arc<Mutex<AccountantSkel<W>>>,
         addr: &str,
+        subs: Arc<RwLock<subscribers::Subscribers>>,
         exit: Arc<AtomicBool>,
     ) -> Result<Vec<JoinHandle<()>>> {
         let read = UdpSocket::bind(addr)?;
@@ -300,35 +321,64 @@ impl<W: Write + Send + 'static> AccountantSkel<W> {
             streamer::responder(write, exit.clone(), blob_recycler.clone(), blob_receiver);
         let (verified_sender, verified_receiver) = channel();
 
-        let exit_ = exit.clone();
-        let t_verifier = spawn(move || loop {
-            let e = Self::verifier(&packet_receiver, &verified_sender);
-            if e.is_err() && exit_.load(Ordering::Relaxed) {
-                break;
-            }
-        });
+        let (processed_entry_sender, processed_entry_receiver) = channel();
 
-        let skel = obj.clone();
-        let t_server = spawn(move || loop {
-            let e = Self::process(
-                &skel,
-                &verified_receiver,
-                &blob_sender,
-                &packet_recycler,
-                &blob_recycler,
-            );
-            if e.is_err() && exit.load(Ordering::Relaxed) {
-                break;
-            }
-        });
-        Ok(vec![t_receiver, t_responder, t_server, t_verifier])
+        let t_verifier = {
+            let exit_ = exit.clone();
+            let thread = spawn(move || loop {
+                let e = Self::verifier(&packet_receiver, &verified_sender);
+                if e.is_err() && exit_.load(Ordering::Relaxed) {
+                    break;
+                }
+            });
+            thread
+        };
+
+        let t_server = {
+            let exit_ = exit.clone();
+            let skel = obj.clone();
+            let thread = spawn(move || loop {
+                let e = Self::process(
+                    &skel,
+                    &verified_receiver,
+                    &blob_sender,
+                    &packet_recycler,
+                    &blob_recycler,
+                    &processed_entry_sender,
+                );
+                if e.is_err() && exit_.load(Ordering::Relaxed) {
+                    break;
+                }
+            });
+            thread
+        };
+
+        // thread to receive processed entries from
+        // historian and then replicate that to level1 nodes
+        let t_leader_replicate_state_to_level1 = {
+            let skel = obj.clone();
+            let exit_ = exit.clone();
+            let thread = spawn(move || loop {
+                let e = Self::leader_replicate_state_to_level1(
+                    &skel,
+                    &processed_entry_receiver,
+                    &subs,
+                );
+                if e.is_err() && exit_.load(Ordering::Relaxed) {
+                    break;
+                }
+            });
+            thread
+        };
+ 
+        Ok(vec![t_receiver, t_responder, t_server, t_verifier, t_leader_replicate_state_to_level1])
     }
 
     /// This service receives messages from a leader in the network and processes the transactions
     /// on the accountant state.
     /// # Arguments
     /// * `obj` - The accountant state.
-    /// * `rsubs` - The subscribers.
+    /// * `subs` - The subscribers.
     /// * `exit` - The exit signal.
     /// # Remarks
     /// The pipeline is constructed as follows:
@@ -343,10 +393,10 @@ impl<W: Write + Send + 'static> AccountantSkel<W> {
     /// 5. respond with the hash of the state back to the leader
     pub fn replicate(
         obj: &Arc<Mutex<AccountantSkel<W>>>,
-        rsubs: subscribers::Subscribers,
+        subs: Arc<RwLock<subscribers::Subscribers>>,
         exit: Arc<AtomicBool>,
     ) -> Result<Vec<JoinHandle<()>>> {
-        let read = UdpSocket::bind(rsubs.me.addr)?;
+        let read = UdpSocket::bind(subs.read().unwrap().me.addr)?;
         // make sure we are on the same interface
         let mut local = read.local_addr()?;
         local.set_port(0);
@@ -355,11 +405,13 @@ impl<W: Write + Send + 'static> AccountantSkel<W> {
         let blob_recycler = packet::BlobRecycler::default();
         let (blob_sender, blob_receiver) = channel();
         let t_blob_receiver =
-            streamer::blob_receiver(exit.clone(), blob_recycler.clone(), read, blob_sender.clone())?;
+            streamer::blob_receiver(exit.clone(),
+                                    blob_recycler.clone(),
+                                    read,
+                                    blob_sender.clone())?;
         let (window_sender, window_receiver) = channel();
         let (retransmit_sender, retransmit_receiver) = channel();
 
-        let subs = Arc::new(RwLock::new(rsubs));
         let t_retransmit = streamer::retransmitter(
             write,
             exit.clone(),
@@ -436,7 +488,9 @@ mod tests {
     use std::time::Duration;
     use transaction::Transaction;
 
+    use std::sync::RwLock;
     use subscribers::{Node, Subscribers};
+    use std::sync::mpsc::channel;
 
     #[test]
     fn test_layout() {
@@ -474,17 +528,18 @@ mod tests {
         let rsp_addr: SocketAddr = "0.0.0.0:0".parse().expect("socket address");
         let historian = Historian::new(&mint.last_id(), None);
         let mut skel = AccountantSkel::new(acc, mint.last_id(), sink(), historian);
+        let (entry_sender, _entry_receiver) = channel();
 
         // Process a batch that includes a transaction that receives two tokens.
         let alice = KeyPair::new();
         let tr = Transaction::new(&mint.keypair(), alice.pubkey(), 2, mint.last_id());
         let req_vers = vec![(Request::Transaction(tr), rsp_addr, 1_u8)];
-        assert!(skel.process_packets(req_vers).is_ok());
+        assert!(skel.process_packets(req_vers, &entry_sender).is_ok());
 
         // Process a second batch that spends one of those tokens.
         let tr = Transaction::new(&alice, mint.pubkey(), 1, mint.last_id());
         let req_vers = vec![(Request::Transaction(tr), rsp_addr, 1_u8)];
-        assert!(skel.process_packets(req_vers).is_ok());
+        assert!(skel.process_packets(req_vers, &entry_sender).is_ok());
 
         // Collect the ledger and feed it to a new accountant.
         skel.historian.sender.send(Signal::Tick).unwrap();
@@ -518,7 +573,11 @@ mod tests {
             sink(),
             historian,
         )));
-        let _threads = AccountantSkel::serve(&acc, &addr, exit.clone()).unwrap();
+        let node_me = Node::default();
+        let node_leader = Node::default();
+        let rsubs = Subscribers::new(node_me, node_leader, &[]);
+        let subs = Arc::new(RwLock::new(rsubs));
+        let _threads = AccountantSkel::serve(&acc, &addr, subs, exit.clone()).unwrap();
         sleep(Duration::from_millis(300));
 
         let socket = UdpSocket::bind(send_addr).unwrap();
@@ -561,8 +620,27 @@ mod tests {
         )));
         let node_me = Node::default();
         let node_leader = Node::default();
-        let subs = Subscribers::new(node_me, node_leader, &[]);
-        let _threads = AccountantSkel::replicate(&acc, subs, exit.clone()).unwrap();
+        let rsubs = Subscribers::new(node_me, node_leader, &[]);
+        let subs = Arc::new(RwLock::new(rsubs));
+        let threads = AccountantSkel::replicate(&acc, subs.clone(), exit.clone()).unwrap();
+
+        let _threads = AccountantSkel::serve(&acc, &addr, subs, exit.clone()).unwrap();
+        sleep(Duration::from_millis(300));
+
+        let socket = UdpSocket::bind(send_addr).unwrap();
+        socket.set_read_timeout(Some(Duration::new(5, 0))).unwrap();
+
+        let acc = AccountantStub::new(&addr, socket);
+        let last_id = acc.get_last_id().unwrap();
+
+        let tr = Transaction::new(&alice.keypair(), bob_pubkey, 500, last_id);
+
+        let _sig = acc.transfer_signed(tr).unwrap();
+
+        let last_id = acc.get_last_id().unwrap();
+
+        println!("last_id: {:?}", last_id);
+
         exit.store(true, Ordering::Relaxed);
     }
 
@@ -626,9 +704,10 @@ mod bench {
 
         let historian = Historian::new(&mint.last_id(), None);
         let mut skel = AccountantSkel::new(acc, mint.last_id(), sink(), historian);
+        let (entry_sender, entry_receiver) = channel();
 
         let now = Instant::now();
-        assert!(skel.process_packets(req_vers).is_ok());
+        assert!(skel.process_packets(req_vers, entry_sender).is_ok());
         let duration = now.elapsed();
         let sec = duration.as_secs() as f64 + duration.subsec_nanos() as f64 / 1_000_000_000.0;
         let tps = txs as f64 / sec;

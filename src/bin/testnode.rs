@@ -15,7 +15,9 @@ use std::env;
 use std::io::{stdin, stdout, Read};
 use std::process::exit;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
+
+use solana::subscribers::{Node, Subscribers};
 
 fn print_usage(program: &str, opts: Options) {
     let mut brief = format!("Usage: cat <transaction.log> | {} [options]\n\n", program);
@@ -99,8 +101,14 @@ fn main() {
         stdout(),
         historian,
     )));
+
+    let node_me = Node::default();
+    let node_leader = Node::default();
+    let rsubs = Subscribers::new(node_me, node_leader, &[]);
+    let subs = Arc::new(RwLock::new(rsubs));
+
     eprintln!("Listening on {}", addr);
-    let threads = AccountantSkel::serve(&skel, &addr, exit.clone()).unwrap();
+    let threads = AccountantSkel::serve(&skel, &addr, subs, exit.clone()).unwrap();
     for t in threads {
         t.join().expect("join");
     }
