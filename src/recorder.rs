@@ -11,6 +11,7 @@ use hash::{hash, Hash};
 use std::mem;
 use std::sync::mpsc::{Receiver, SyncSender, TryRecvError};
 use std::time::{Duration, Instant};
+use packet::BLOB_SIZE;
 
 #[cfg_attr(feature = "cargo-clippy", allow(large_enum_variant))]
 pub enum Signal {
@@ -83,7 +84,7 @@ impl Recorder {
                         // Record an entry early if we anticipate its serialized size will
                         // be larger than 64kb. At the time of this writing, we assume each
                         // event will be well under 256 bytes.
-                        if self.events.len() >= 65_536 / 256 {
+                        if self.events.len() >= BLOB_SIZE / (2 * mem::size_of::<Event>()) {
                             self.record_entry()?;
                         }
                     }
