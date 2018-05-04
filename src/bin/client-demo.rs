@@ -142,10 +142,12 @@ fn main() {
         if tx_count > last_tx_count {
             duration = now.elapsed();
         } else {
-            if last_count_tripped > 1 {
-                break;
+            if tx_count > 0 {
+                if last_count_tripped > 1 {
+                    break;
+                }
+                last_count_tripped += 1;
             }
-            last_count_tripped += 1;
         }
         last_tx_count = tx_count;
     }
