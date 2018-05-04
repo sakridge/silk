@@ -247,10 +247,10 @@ impl AccountantSkel {
     fn recv_batch(recvr: &streamer::PacketReceiver) -> Result<Vec<SharedPackets>> {
         let timer = Duration::new(1, 0);
         let msgs = recvr.recv_timeout(timer)?;
-        trace!("got msgs");
+        debug!("got msgs");
         let mut batch = vec![msgs];
         while let Ok(more) = recvr.try_recv() {
-            trace!("got more msgs");
+            debug!("got more msgs");
             batch.push(more);
         }
         info!("batch len {}", batch.len());
@@ -275,6 +275,7 @@ impl AccountantSkel {
     ) -> Result<()> {
         let batch = Self::recv_batch(recvr)?;
         let verified_batches = Self::verify_batch(batch);
+        debug!("verified batches: {}", verified_batches.len());
         for xs in verified_batches {
             sendr.send(xs)?;
         }
@@ -315,8 +316,9 @@ impl AccountantSkel {
         &self,
         req_vers: Vec<(Request, SocketAddr, u8)>,
     ) -> Result<Vec<(Response, SocketAddr)>> {
-        trace!("partitioning");
+        debug!("partitioning");
         let (trs, reqs) = Self::partition_requests(req_vers);
+        debug!("trs: {} reqs: {}", trs.len(), reqs.len());
 
         // Process the transactions in parallel and then log the successful ones.
         for result in self.acc.lock().unwrap().process_verified_transactions(trs) {
@@ -328,14 +330,20 @@ impl AccountantSkel {
             }
         }
 
+        debug!("processing verified");
+
         // Let validators know they should not attempt to process additional
         // transactions in parallel.
         self.historian_input.lock().unwrap().send(Signal::Tick)?;
+
+        debug!("after historian_input");
 
         // Process the remaining requests serially.
         let rsps = reqs.into_iter()
             .filter_map(|(req, rsp_addr)| self.process_request(req, rsp_addr))
             .collect();
+ 
+        debug!("returning rsps");
 
         Ok(rsps)
     }
@@ -377,7 +385,7 @@ impl AccountantSkel {
     ) -> Result<()> {
         let timer = Duration::new(1, 0);
         let mms = verified_receiver.recv_timeout(timer)?;
-        trace!("got some messages: {}", mms.len());
+        debug!("got some messages: {}", mms.len());
         for (msgs, vers) in mms {
             let reqs = Self::deserialize_packets(&msgs.read().unwrap());
             let req_vers = reqs.into_iter()
@@ -389,18 +397,18 @@ impl AccountantSkel {
                     v
                 })
                 .collect();
-            trace!("process_packets");
+            debug!("process_packets");
             let rsps = obj.process_packets(req_vers)?;
-            trace!("done process_packets");
+            debug!("done process_packets");
             let blobs = Self::serialize_responses(rsps, blob_recycler)?;
-            trace!("sending blobs: {}", blobs.len());
+            debug!("process: sending blobs: {}", blobs.len());
             if !blobs.is_empty() {
                 //don't wake up the other side if there is nothing
                 responder_sender.send(blobs)?;
             }
             packet_recycler.recycle(msgs);
         }
-        trace!("done responding");
+        debug!("done responding");
         Ok(())
     }
     /// Process verified blobs, already in order
