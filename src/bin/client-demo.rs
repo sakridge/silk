@@ -21,6 +21,7 @@ use std::process::exit;
 use std::time::Instant;
 use untrusted::Input;
 use std::time::Duration;
+use std::thread::sleep;
 
 fn print_usage(program: &str, opts: Options) {
     let mut brief = format!("Usage: cat <mint.json> | {} [options]\n\n", program);
@@ -117,6 +118,7 @@ fn main() {
     );
 
     let initial_tx_count = acc.transaction_count();
+    println!("initial count {}", initial_tx_count);
 
     println!("Transfering {} transactions in {} batches", txs, threads);
     let now = Instant::now();
@@ -137,24 +139,14 @@ fn main() {
     let mut tx_count;
     let mut last_tx_count = 0;
     let mut last_count_tripped = 0;
-    loop {
+    for _ in 0..5 {
         tx_count = acc.transaction_count();
-        if tx_count > last_tx_count {
-            duration = now.elapsed();
-        } else {
-            if tx_count > 0 {
-                if last_count_tripped > 1 {
-                    break;
-                }
-                last_count_tripped += 1;
-            }
-        }
-        last_tx_count = tx_count;
+        duration = now.elapsed();
+        let txs = tx_count - initial_tx_count;
+        println!("Transactions processed {}", txs);
+        let ns = duration.as_secs() * 1_000_000_000 + u64::from(duration.subsec_nanos());
+        let tps = (txs * 1_000_000_000) as f64 / ns as f64;
+        println!("{} tps", tps);
+        sleep(Duration::new(1,0));
     }
-    let txs = tx_count - initial_tx_count;
-    println!("Transactions processed {}", txs);
-
-    let ns = duration.as_secs() * 1_000_000_000 + u64::from(duration.subsec_nanos());
-    let tps = (txs * 1_000_000_000) as f64 / ns as f64;
-    println!("Done. {} tps", tps);
 }
