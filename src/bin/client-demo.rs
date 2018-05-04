@@ -20,6 +20,7 @@ use std::net::{SocketAddr, UdpSocket};
 use std::process::exit;
 use std::time::Instant;
 use untrusted::Input;
+use std::time::Duration;
 
 fn print_usage(program: &str, opts: Options) {
     let mut brief = format!("Usage: cat <mint.json> | {} [options]\n\n", program);
@@ -38,7 +39,7 @@ fn main() {
     let mut opts = Options::new();
     opts.optopt("s", "", "server address", "host:port");
     opts.optopt("c", "", "client address", "host:port");
-    opts.optopt("t", "", "number of threads", "4");
+    opts.optopt("t", "", "number of threads", &format!("{}", threads));
     opts.optflag("h", "help", "print help");
     let args: Vec<String> = env::args().collect();
     let matches = match opts.parse(&args[1..]) {
@@ -84,6 +85,7 @@ fn main() {
 
     println!("Binding to {}", client_addr);
     let socket = UdpSocket::bind(&client_addr).unwrap();
+    socket.set_read_timeout(Some(Duration::new(5, 0))).unwrap();
     let mut acc = AccountantStub::new(addr.parse().unwrap(), socket);
 
     println!("Get last ID...");
@@ -104,7 +106,7 @@ fn main() {
         .into_par_iter()
         .map(|chunk| Transaction::new(&chunk[0], chunk[1].pubkey(), 1, last_id))
         .collect();
-    let duration = now.elapsed();
+    let mut duration = now.elapsed();
     let ns = duration.as_secs() * 1_000_000_000 + u64::from(duration.subsec_nanos());
     let bsps = txs as f64 / ns as f64;
     let nsps = ns as f64 / txs as f64;
@@ -131,15 +133,25 @@ fn main() {
         }
     });
 
-    println!("Waiting for half the transactions to complete...",);
-    let mut tx_count = acc.transaction_count();
-    while tx_count < transactions.len() as u64 / 2 {
+    println!("Waiting for transactions to complete...",);
+    let mut tx_count;
+    let mut last_tx_count = 0;
+    let mut last_count_tripped = 0;
+    loop {
         tx_count = acc.transaction_count();
+        if tx_count > last_tx_count {
+            duration = now.elapsed();
+        } else {
+            if last_count_tripped > 1 {
+                break;
+            }
+            last_count_tripped += 1;
+        }
+        last_tx_count = tx_count;
     }
     let txs = tx_count - initial_tx_count;
     println!("Transactions processed {}", txs);
 
-    let duration = now.elapsed();
     let ns = duration.as_secs() * 1_000_000_000 + u64::from(duration.subsec_nanos());
     let tps = (txs * 1_000_000_000) as f64 / ns as f64;
     println!("Done. {} tps", tps);
