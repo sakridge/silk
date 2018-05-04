@@ -21,7 +21,7 @@ use std::process::exit;
 use std::time::Instant;
 use untrusted::Input;
 use std::time::Duration;
-use std::thread::sleep;
+use std::thread::{spawn, sleep};
 
 fn print_usage(program: &str, opts: Options) {
     let mut brief = format!("Usage: cat <mint.json> | {} [options]\n\n", program);
@@ -94,12 +94,12 @@ fn main() {
     println!("Got last ID {:?}", last_id);
 
     println!("Creating keypairs...");
-    let txs = demo.users.len() / 2;
     let keypairs: Vec<_> = demo.users
         .into_par_iter()
         .map(|(pkcs8, _)| KeyPair::from_pkcs8(Input::from(&pkcs8)).unwrap())
         .collect();
-    let keypair_pairs: Vec<_> = keypairs.chunks(2).collect();
+    let pairs: Vec<_> = keypairs.iter().cycle().take(10_000_000).collect();
+    let keypair_pairs: Vec<_> = pairs.chunks(2).collect();
 
     println!("Signing transactions...");
     let now = Instant::now();
@@ -107,7 +107,8 @@ fn main() {
         .into_par_iter()
         .map(|chunk| Transaction::new(&chunk[0], chunk[1].pubkey(), 1, last_id))
         .collect();
-    let mut duration = now.elapsed();
+    let txs = transactions.len();
+    let duration = now.elapsed();
     let ns = duration.as_secs() * 1_000_000_000 + u64::from(duration.subsec_nanos());
     let bsps = txs as f64 / ns as f64;
     let nsps = ns as f64 / txs as f64;
@@ -116,37 +117,47 @@ fn main() {
         bsps * 1_000_000_f64,
         nsps / 1_000_f64
     );
-
-    let initial_tx_count = acc.transaction_count();
-    println!("initial count {}", initial_tx_count);
-
-    println!("Transfering {} transactions in {} batches", txs, threads);
-    let now = Instant::now();
-    let sz = transactions.len() / threads;
-    let chunks: Vec<_> = transactions.chunks(sz).collect();
-    chunks.into_par_iter().for_each(|trs| {
-        println!("Transferring 1 unit {} times... to", trs.len());
-        let mut client_addr: SocketAddr = client_addr.parse().unwrap();
-        client_addr.set_port(0);
-        let socket = UdpSocket::bind(client_addr).unwrap();
-        let acc = AccountantStub::new(addr.parse().unwrap(), socket);
-        for tr in trs {
-            acc.transfer_signed(tr.clone()).unwrap();
-        }
+    //submit transactions in the background
+    let _thread = spawn(move|| {
+        let sz = txs / threads;
+        println!("Transfering {} transactions in {} batches of {}", transactions.len(), threads, sz);
+        let chunks: Vec<_> = transactions.chunks(sz).collect();
+        chunks.into_par_iter().for_each(|trs| {
+            println!("Transferring 1 unit {} times... to", trs.len());
+            let mut client_addr: SocketAddr = client_addr.parse().unwrap();
+            client_addr.set_port(0);
+            let socket = UdpSocket::bind(client_addr).unwrap();
+            let acc = AccountantStub::new(addr.parse().unwrap(), socket);
+            for tr in trs {
+                acc.transfer_signed(tr.clone()).unwrap();
+            }
+        });
     });
+    let mut now = Instant::now();
+    let mut initial_tx_count = acc.transaction_count();
+    while initial_tx_count == 0 {
+        now = Instant::now();
+        initial_tx_count = acc.transaction_count();
+    }
+    println!("initial count {}", initial_tx_count);
 
     println!("Waiting for transactions to complete...",);
     let mut tx_count;
-    let mut last_tx_count = 0;
-    let mut last_count_tripped = 0;
-    for _ in 0..5 {
+    let mut max = 0f64;
+    //sample and find the fastest second
+    for _ in 0..15 {
         tx_count = acc.transaction_count();
-        duration = now.elapsed();
+        let duration = now.elapsed();
         let txs = tx_count - initial_tx_count;
         println!("Transactions processed {}", txs);
         let ns = duration.as_secs() * 1_000_000_000 + u64::from(duration.subsec_nanos());
         let tps = (txs * 1_000_000_000) as f64 / ns as f64;
-        println!("{} tps", tps);
+        if tps > max {
+            max = tps;
+        }
+        println!("cur: {} tps, max: {}", tps, max);
+        initial_tx_count = acc.transaction_count();
+        now = Instant::now();
         sleep(Duration::new(1,0));
     }
 }
