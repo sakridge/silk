@@ -118,6 +118,7 @@ fn main() {
     );
 
     let initial_tx_count = acc.transaction_count();
+    println!("initial count {}", initial_tx_count);
 
     println!("Transfering {} transactions in {} batches", txs, threads);
     let now = Instant::now();

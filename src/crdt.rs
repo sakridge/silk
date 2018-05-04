@@ -258,13 +258,19 @@ impl Crdt {
     /// (A,B)
     /// * A - Address to send to
     /// * B - RequestUpdates protocol message
-    fn gossip_request(&self) -> (SocketAddr, Protocol) {
-        let n = (Self::random() as usize) % self.table.len();
+    fn gossip_request(&self) -> Result<(SocketAddr, Protocol)> {
+        if self.table.len() <= 1 {
+            return Err(Error::GeneralError);
+        }
+        let mut n = (Self::random() as usize) % self.table.len();
+        while self.table.values().nth(n).unwrap().id == self.me {
+            n = (Self::random() as usize) % self.table.len();
+        }
         trace!("random {:?} {}", &self.me[0..1], n);
         let v = self.table.values().nth(n).unwrap().clone();
         let remote_update_index = *self.remote.get(&v.id).unwrap_or(&0);
         let req = Protocol::RequestUpdates(remote_update_index, self.table[&self.me].clone());
-        (v.gossip_addr, req)
+        Ok((v.gossip_addr, req))
     }
 
     /// At random pick a node and try to get updated changes from them
@@ -274,7 +280,7 @@ impl Crdt {
 
         // Lock the object only to do this operation and not for any longer
         // especially not when doing the `sock.send_to`
-        let (remote_gossip_addr, req) = obj.read().unwrap().gossip_request();
+        let (remote_gossip_addr, req) = obj.read().unwrap().gossip_request()?;
         let sock = UdpSocket::bind("0.0.0.0:0")?;
         // TODO this will get chatty, so we need to first ask for number of updates since
         // then only ask for specific data that we dont have
