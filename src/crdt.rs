@@ -28,6 +28,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread::{sleep, spawn, JoinHandle};
 use std::time::Duration;
+use std::fmt;
 
 /// Structure to be replicated by the network
 #[derive(Serialize, Deserialize, Clone)]
@@ -48,6 +49,13 @@ pub struct ReplicatedData {
     last_verified_hash: Hash,
     /// last verified count, always increasing
     last_verified_count: u64,
+}
+
+impl fmt::Debug for ReplicatedData {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f,
+               "RepData: id: {} v: {}", self.id[0], self.version)
+    }
 }
 
 impl ReplicatedData {
@@ -144,18 +152,17 @@ impl Crdt {
         if self.table.get(&v.id).is_none() || (v.version > self.table[&v.id].version) {
             //somehow we signed a message for our own identity with a higher version that
             // we have stored ourselves
-            trace!("me: {:?}", self.me[0]);
-            trace!("v.id: {:?}", v.id[0]);
-            trace!("insert! {}", v.version);
             self.update_index += 1;
+            trace!("insert: me: {:?} v.id: {} version: {} update_index: {}",
+                   self.me[0], v.id[0], v.version, self.update_index);
             let _ = self.table.insert(v.id.clone(), v.clone());
             let _ = self.local.insert(v.id, self.update_index);
         } else {
-            trace!(
+            /*trace!(
                 "INSERT FAILED new.version: {} me.version: {}",
                 v.version,
                 self.table[&v.id].version
-            );
+            );*/
         }
     }
 
@@ -233,9 +240,10 @@ impl Crdt {
                     error!("broadcast result {:?}", e);
                     return Err(Error::IO(e));
                 }
-                _ => (),
+                _ => { info!("broadcast succcess: {:?}", e); },
             }
             *transmit_index += 1;
+            info!("inc transmit_index: {}", *transmit_index);
         }
         Ok(())
     }
@@ -343,6 +351,13 @@ impl Crdt {
         let v = options[n].clone();
         let remote_update_index = *self.remote.get(&v.id).unwrap_or(&0);
         let req = Protocol::RequestUpdates(remote_update_index, self.table[&self.me].clone());
+        match &req {
+            Protocol::RequestUpdates(idx, _data) => {
+                info!("making gossip req idx: {} me.id: {} target.id: {}", idx, self.me[0], v.id[0]);
+            }
+            _ => {}
+        }
+
         Ok((v.gossip_addr, req))
     }
 
@@ -370,7 +385,7 @@ impl Crdt {
     /// * `update_index` - the number of updates that `from` has completed and this set of `data` represents
     /// * `data` - the update data
     fn apply_updates(&mut self, from: PublicKey, update_index: u64, data: &[ReplicatedData]) {
-        trace!("got updates {}", data.len());
+        trace!("got updates {} from: {} my.id: {}", data.len(), from[0], self.my_data().id[0]);
         // TODO we need to punish/spam resist here
         // sig verify the whole update and slash anyone who sends a bad update
         for v in data {
@@ -382,6 +397,7 @@ impl Crdt {
     /// randomly pick a node and ask them for updates asynchronously
     pub fn gossip(obj: Arc<RwLock<Self>>, exit: Arc<AtomicBool>) -> JoinHandle<()> {
         spawn(move || loop {
+            trace!("gossip me.id: {}", obj.read().unwrap().me[0]);
             let _ = Self::run_gossip(&obj);
             if exit.load(Ordering::Relaxed) {
                 return;
@@ -430,32 +446,34 @@ impl Crdt {
     ) -> Result<()> {
         //TODO cache connections
         let mut buf = vec![0u8; 1024 * 64];
+        let id = obj.read().unwrap().my_data().id[0];
         let (amt, src) = sock.recv_from(&mut buf)?;
-        trace!("got request from {}", src);
+        //trace!("got request from {} me.id: {}", src, id);
         buf.resize(amt, 0);
         let r = deserialize(&buf)?;
         match r {
             // TODO sigverify these
             Protocol::RequestUpdates(v, reqdata) => {
-                trace!("RequestUpdates {}", v);
+                //debug!("RequestUpdates v: {} me.id: {}", v, id);
                 let addr = reqdata.gossip_addr;
                 // only lock for this call, dont lock during IO `sock.send_to` or `sock.recv_from`
                 let (from, ups, data) = obj.read()
                     .expect("'obj' read lock in RequestUpdates")
                     .get_updates_since(v);
-                trace!("get updates since response {} {}", v, data.len());
+                //trace!("RequestUpdates since response v: {} data: {:?} me.id: {} ups: {} from: {}", v, data, id, ups, src);
+                trace!("RequestUpdates since response v: {} data.len: {:?} me.id: {} ups: {} from: {}", v, data.len(), id, ups, src);
                 let rsp = serialize(&Protocol::ReceiveUpdates(from, ups, data))?;
-                trace!("send_to {}", addr);
+                //trace!("send_to {} me.id: {}", addr, id);
                 //TODO verify reqdata belongs to sender
                 obj.write()
                     .expect("'obj' write lock in RequestUpdates")
                     .insert(&reqdata);
                 sock.send_to(&rsp, addr)
                     .expect("'sock.send_to' in RequestUpdates");
-                trace!("send_to done!");
+                //trace!("send_to done! me.id: {}", id);
             }
             Protocol::ReceiveUpdates(from, ups, data) => {
-                trace!("ReceivedUpdates");
+                //debug!("ReceivedUpdates from: {:?} me.id: {}", from[0], id);
                 obj.write()
                     .expect("'obj' write lock in ReceiveUpdates")
                     .apply_updates(from, ups, &data);
@@ -464,10 +482,10 @@ impl Crdt {
                 //TODO verify from is signed
                 obj.write().unwrap().insert(&from);
                 let me = obj.read().unwrap().my_data().clone();
-                info!(
-                    "received RequestWindowIndex {} {} myaddr {}",
-                    ix, from.replicate_addr, me.replicate_addr
-                );
+                /*info!(
+                    "received RequestWindowIndex {} {} myaddr {} me.id: {}",
+                    ix, from.replicate_addr, me.replicate_addr, id
+                );*/
                 assert_ne!(from.replicate_addr, me.replicate_addr);
                 let _ = Self::run_window_request(window, sock, &from, ix);
             }
@@ -535,7 +553,7 @@ mod test {
     where
         F: Fn(&Vec<(Arc<RwLock<Crdt>>, JoinHandle<()>)>) -> (),
     {
-        let num: usize = 5;
+        let num: usize = 10;
         let exit = Arc::new(AtomicBool::new(false));
         let listen: Vec<_> = (0..num)
             .map(|_| {
@@ -555,15 +573,17 @@ mod test {
         for _ in 0..(num * 32) {
             done = true;
             for &(ref c, _) in listen.iter() {
+                let cr = c.read().unwrap();
                 trace!(
-                    "done updates {} {}",
-                    c.read().unwrap().table.len(),
-                    c.read().unwrap().update_index
+                    "done updates table: {} update_index {} id: {}",
+                    cr.table.len(),
+                    cr.update_index,
+                    cr.me[0],
                 );
                 //make sure the number of updates doesn't grow unbounded
-                assert!(c.read().unwrap().update_index <= num as u64);
+                assert!(cr.update_index <= num as u64);
                 //make sure we got all the updates
-                if c.read().unwrap().table.len() != num {
+                if cr.table.len() != num {
                     done = false;
                 }
             }
@@ -588,7 +608,6 @@ mod test {
     }
     /// ring a -> b -> c -> d -> e -> a
     #[test]
-    #[ignore]
     fn gossip_ring_test() {
         run_gossip_topo(|listen| {
             let num = listen.len();
@@ -606,8 +625,8 @@ mod test {
 
     /// star (b,c,d,e) -> a
     #[test]
-    #[ignore]
     fn gossip_star_test() {
+        logger::setup();
         run_gossip_topo(|listen| {
             let num = listen.len();
             for n in 0..(num - 1) {
@@ -643,9 +662,8 @@ mod test {
     }
 
     #[test]
-    #[ignore]
     pub fn test_crdt_retransmit() {
-        logger::setup();
+        //logger::setup();
         trace!("c1:");
         let (mut c1, s1, r1, e1) = test_node();
         trace!("c2:");

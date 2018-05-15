@@ -727,10 +727,9 @@ mod test {
     }
 
     #[test]
-    #[ignore]
     //retransmit from leader to replicate target
     pub fn retransmit() {
-        logger::setup();
+        //logger::setup();
         trace!("retransmit test start");
         let exit = Arc::new(AtomicBool::new(false));
         let (crdt_leader, sock_gossip_leader, _, sock_leader) = test_node();

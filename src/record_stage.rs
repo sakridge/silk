@@ -104,7 +104,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_ticking_historian() {
         let (input, event_receiver) = channel();
         let zero = Hash::default();

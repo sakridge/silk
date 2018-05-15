@@ -174,7 +174,6 @@ mod tests {
     use tvu::{self, Tvu};
 
     #[test]
-    #[ignore]
     fn test_thin_client() {
         logger::setup();
         let gossip = UdpSocket::bind("0.0.0.0:0").unwrap();
@@ -244,7 +243,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_bad_sig() {
         let (leader_data, leader_gossip, _, leader_serve, _leader_events) = tvu::test_node();
         let alice = Mint::new(10_000);
@@ -394,12 +392,12 @@ mod tests {
         v.clone()
     }
     #[test]
-    #[ignore]
     fn test_multi_node() {
         logger::setup();
         const N: usize = 5;
         trace!("test_multi_accountant_stub");
         let leader = test_node();
+        info!("leader: {:?} {:?} {:?} id: {}", leader.1, leader.2, leader.3, leader.0.id[0]);
         let alice = Mint::new(10_000);
         let bob_pubkey = KeyPair::new().pubkey();
         let exit = Arc::new(AtomicBool::new(false));
@@ -443,7 +441,7 @@ mod tests {
             let mut client = ThinClient::new(leader.0.serve_addr, requests_socket, events_socket);
             trace!("getting leader last_id");
             let last_id = client.get_last_id().wait().unwrap();
-            info!("executing leader transer");
+            info!("executing leader transfer");
             let _sig = client
                 .transfer(500, &alice.keypair(), bob_pubkey, &last_id)
                 .unwrap();
