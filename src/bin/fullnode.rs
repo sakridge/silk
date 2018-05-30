@@ -134,6 +134,14 @@ fn main() {
     // we need all the receiving sockets to be bound within the expected
     // port range that we open on aws
     let mut repl_data = make_repl_data(&bind_addr);
+
+    if matches.opt_present("s") {
+        let path = matches.opt_str("s").unwrap();
+        let file = File::create(path).expect("file");
+        serde_json::to_writer(file, &repl_data).expect("serialize");
+        eprintln!("wrote leader.json");
+    }
+
     if matches.opt_present("l") {
         let path = matches.opt_str("l").unwrap();
         if let Ok(file) = File::open(path.clone()) {
@@ -144,6 +152,7 @@ fn main() {
             }
         }
     }
+
     let threads = if matches.opt_present("v") {
         eprintln!("starting validator... {}", repl_data.requests_addr);
         let path = matches.opt_str("v").unwrap();
@@ -180,11 +189,6 @@ fn main() {
         );
         server.thread_hdls
     };
-    if matches.opt_present("s") {
-        let path = matches.opt_str("s").unwrap();
-        let file = File::create(path).expect("file");
-        serde_json::to_writer(file, &repl_data).expect("serialize");
-    }
     eprintln!("Ready. Listening on {}", repl_data.transactions_addr);
 
     for t in threads {
