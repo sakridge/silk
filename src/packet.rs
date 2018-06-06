@@ -273,6 +273,8 @@ const BLOB_INDEX_END: usize = size_of::<u64>();
 const BLOB_ID_END: usize = BLOB_INDEX_END + size_of::<usize>() + size_of::<PublicKey>();
 const BLOB_FLAGS_END: usize = BLOB_ID_END + size_of::<u32>();
 const BLOB_SIZE_END: usize = BLOB_FLAGS_END + size_of::<u64>();
+const BLOB_BEGIN_NUM_HASHES_END: usize = BLOB_SIZE_END + size_of::<u64>();
+const BLOB_END_NUM_HASHES_END: usize = BLOB_BEGIN_NUM_HASHES_END + size_of::<u64>();
 
 macro_rules! align {
     ($x:expr, $align:expr) => {
@@ -281,7 +283,7 @@ macro_rules! align {
 }
 
 pub const BLOB_FLAG_IS_CODING: u32 = 0x1;
-pub const BLOB_HEADER_SIZE: usize = align!(BLOB_SIZE_END, 64);
+pub const BLOB_HEADER_SIZE: usize = align!(BLOB_END_NUM_HASHES_END, 64);
 
 impl Blob {
     pub fn get_index(&self) -> Result<u64> {
@@ -340,6 +342,32 @@ impl Blob {
         let mut wtr = vec![];
         wtr.write_u64::<LittleEndian>(ix)?;
         self.data[BLOB_FLAGS_END..BLOB_SIZE_END].clone_from_slice(&wtr);
+        Ok(())
+    }
+
+    pub fn get_num_hashes_start(&self) -> Result<u64> {
+        let mut rdr = io::Cursor::new(&self.data[BLOB_SIZE_END..BLOB_BEGIN_NUM_HASHES_END]);
+        let r = rdr.read_u64::<LittleEndian>()?;
+        Ok(r)
+    }
+
+    pub fn set_num_hashes_start(&mut self, ix: u64) -> Result<()> {
+        let mut wtr = vec![];
+        wtr.write_u64::<LittleEndian>(ix)?;
+        self.data[BLOB_SIZE_END..BLOB_BEGIN_NUM_HASHES_END].clone_from_slice(&wtr);
+        Ok(())
+    }
+
+    pub fn get_num_hashes_end(&self) -> Result<u64> {
+        let mut rdr = io::Cursor::new(&self.data[BLOB_BEGIN_NUM_HASHES_END..BLOB_END_NUM_HASHES_END]);
+        let r = rdr.read_u64::<LittleEndian>()?;
+        Ok(r)
+    }
+
+    pub fn set_num_hashes_end(&mut self, ix: u64) -> Result<()> {
+        let mut wtr = vec![];
+        wtr.write_u64::<LittleEndian>(ix)?;
+        self.data[BLOB_BEGIN_NUM_HASHES_END..BLOB_END_NUM_HASHES_END].clone_from_slice(&wtr);
         Ok(())
     }
 

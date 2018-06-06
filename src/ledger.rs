@@ -79,7 +79,12 @@ impl Block for [Entry] {
                     out.position() as usize
                 };
                 assert!(pos < BLOB_SIZE);
-                b.write().unwrap().set_size(pos);
+                {
+                    let mut bd = b.write().unwrap();
+                    bd.set_size(pos);
+                    bd.set_num_hashes_start(entry[0].num_hashes).expect("set_num_hashes_start in ledger::to_blobs");
+                    bd.set_num_hashes_end(entry[entry.len() - 1].num_hashes).expect("set_num_hashes_end in ledger::to_blobs");
+                }
                 q.push_back(b);
             }
             start = end;
