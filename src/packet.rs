@@ -411,7 +411,8 @@ impl Blob {
 
 #[cfg(test)]
 mod test {
-    use packet::{to_packets, Blob, BlobRecycler, Packet, PacketRecycler, Packets, NUM_PACKETS};
+    use signature::PublicKey;
+    use packet::{to_packets, Blob, BlobRecycler, Packet, PacketRecycler, Packets, NUM_PACKETS, BLOB_HEADER_SIZE};
     use request::Request;
     use std::collections::VecDeque;
     use std::io;
@@ -526,14 +527,39 @@ mod test {
         write!(io::sink(), "{:?}", Packets::default()).unwrap();
         write!(io::sink(), "{:?}", Blob::default()).unwrap();
     }
+    use logger;
     #[test]
     pub fn blob_test() {
+        logger::setup();
         let mut b = Blob::default();
         b.set_index(<u64>::max_value()).unwrap();
+        let size = 20;
+        b.set_size(size);
         assert_eq!(b.get_index().unwrap(), <u64>::max_value());
         b.data_mut()[0] = 1;
         assert_eq!(b.data()[0], 1);
         assert_eq!(b.get_index().unwrap(), <u64>::max_value());
+        assert_eq!(b.get_data_size().unwrap(), (size + BLOB_HEADER_SIZE) as u64);
+        assert_eq!(b.meta.size, (size + BLOB_HEADER_SIZE));
     }
 
+    #[test]
+    pub fn blob_test_coding() {
+        let pubkey = PublicKey::default();
+        let mut b = Blob::default();
+        let idx = 1000;
+        b.set_index(idx).unwrap();
+        let size = 20;
+        b.set_size(size);
+        assert!(b.set_coding().is_ok());
+        b.set_id(pubkey);
+        assert_eq!(b.get_index().unwrap(), idx);
+        b.data_mut()[0] = 1;
+        assert_eq!(b.data()[0], 1);
+        assert_eq!(b.get_index().unwrap(), idx);
+        assert_eq!(b.get_data_size().unwrap(), (size + BLOB_HEADER_SIZE) as u64);
+        assert_eq!(b.meta.size, (size + BLOB_HEADER_SIZE));
+        assert_eq!(b.is_coding(), true);
+        assert_eq!(b.get_id().unwrap(), pubkey);
+    }
 }
