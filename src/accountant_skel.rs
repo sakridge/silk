@@ -27,6 +27,8 @@ use std::thread::{spawn, JoinHandle};
 use std::time::Duration;
 use streamer;
 use transaction::Transaction;
+use timing;
+use std::time::Instant;
 
 use subscribers;
 
@@ -268,9 +270,20 @@ impl<W: Write + Send + 'static> AccountantSkel<W> {
         blob_recycler: &packet::BlobRecycler,
     ) -> Result<()> {
         let timer = Duration::new(1, 0);
+        let recv_start = Instant::now();
         let mms = verified_receiver.recv_timeout(timer)?;
+		let mut reqs_len = 0;
+		let mms_len = mms.len();
+        info!(
+            "@{:?} process start stalled for: {:?}ms batches: {}",
+            timing::timestamp(),
+            timing::duration_as_ms(&recv_start.elapsed()),
+            mms.len(),
+        );
+		let proc_start = Instant::now();
         for (msgs, vers) in mms {
             let reqs = Self::deserialize_packets(&msgs.read().unwrap());
+			reqs_len += reqs.len();
             let req_vers = reqs.into_iter()
                 .zip(vers)
                 .filter_map(|(req, ver)| req.map(|(msg, addr)| (msg, addr, ver)))
@@ -287,6 +300,17 @@ impl<W: Write + Send + 'static> AccountantSkel<W> {
             // Write new entries to the ledger and notify subscribers.
             obj.lock().unwrap().sync();
         }
+
+        let total_time_s = timing::duration_as_s(&proc_start.elapsed());
+        let total_time_ms = timing::duration_as_ms(&proc_start.elapsed());
+        info!(
+            "@{:?} done processing transaction batches: {} time: {:?}ms reqs: {} reqs/s: {}",
+            timing::timestamp(),
+            mms_len,
+            total_time_ms,
+            reqs_len,
+            (reqs_len as f32) / (total_time_s)
+        );
 
         Ok(())
     }
@@ -748,9 +772,11 @@ mod bench {
     use std::io::sink;
     use std::time::Instant;
     use transaction::Transaction;
+    use logger;
 
     #[bench]
-    fn process_packets_bench(_bencher: &mut Bencher) {
+    fn process_packets_bench(bencher: &mut Bencher) {
+        logger::setup();
         let mint = Mint::new(100_000_000);
         let acc = Accountant::new(&mint);
         let rsp_addr: SocketAddr = "0.0.0.0:0".parse().expect("socket address");
@@ -785,7 +811,7 @@ mod bench {
             })
             .collect();
 
-        let req_vers = transactions
+        let req_vers: Vec<_> = transactions
             .into_iter()
             .map(|tr| (Request::Transaction(tr), rsp_addr, 1_u8))
             .collect();
@@ -793,11 +819,14 @@ mod bench {
         let historian = Historian::new(&mint.last_id(), None);
         let mut skel = AccountantSkel::new(acc, mint.last_id(), sink(), historian);
 
-        let now = Instant::now();
-        assert!(skel.process_packets(req_vers).is_ok());
-        let duration = now.elapsed();
-        let sec = duration.as_secs() as f64 + duration.subsec_nanos() as f64 / 1_000_000_000.0;
-        let tps = txs as f64 / sec;
+        bencher.iter(|| {
+            let now = Instant::now();
+            assert!(skel.process_packets(req_vers.clone()).is_ok());
+            let duration = now.elapsed();
+            let sec = duration.as_secs() as f64 + duration.subsec_nanos() as f64 / 1_000_000_000.0;
+            let tps = txs as f64 / sec;
+            println!("{} tps", tps);
+        });
 
         // Ensure that all transactions were successfully logged.
         drop(skel.historian.sender);
@@ -805,6 +834,5 @@ mod bench {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].events.len(), txs as usize);
 
-        println!("{} tps", tps);
     }
 }

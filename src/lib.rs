@@ -20,6 +20,8 @@ pub mod signature;
 pub mod streamer;
 pub mod subscribers;
 pub mod transaction;
+pub mod timing;
+pub mod logger;
 extern crate bincode;
 extern crate byteorder;
 extern crate chrono;

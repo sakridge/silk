@@ -36,7 +36,11 @@ fn apply_payment(balances: &RwLock<HashMap<PublicKey, RwLock<i64>>>, payment: &P
         *bals[&payment.to].write().unwrap() += payment.tokens;
     } else {
         let mut bals = balances.write().unwrap();
-        bals.insert(payment.to, RwLock::new(payment.tokens));
+        if bals.contains_key(&payment.to) {
+            *bals[&payment.to].write().unwrap() += payment.tokens;
+        } else {
+            bals.insert(payment.to, RwLock::new(payment.tokens));
+        }
     }
 }
 
