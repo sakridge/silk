@@ -121,6 +121,7 @@ impl Bank {
         {
             let bals = self.balances.read().expect("'balances' read lock");
             bals[&payment.to].fetch_add(payment.tokens as isize, Ordering::Relaxed);
+            trace!("updated balance to {}", bals[&payment.to].load(Ordering::Relaxed));
         } else {
             // Now we know the key wasn't present a nanosecond ago, but it might be there
             // by the time we aquire a write lock, so we'll have to check again.

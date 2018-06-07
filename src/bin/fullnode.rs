@@ -21,6 +21,7 @@ use std::process::exit;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 //use std::time::Duration;
+use std::time::Instant;
 
 fn print_usage(program: &str, opts: Options) {
     let mut brief = format!("Usage: cat <transaction.log> | {} [options]\n\n", program);

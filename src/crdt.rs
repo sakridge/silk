@@ -659,6 +659,7 @@ impl Crdt {
                 let rsp = Protocol::ReceiveUpdates(from, ups, data);
                 obj.write().unwrap().insert(&from_rd);
                 if len < 1 {
+                    trace!("taking obj read lock 3");
                     let me = obj.read().unwrap();
                     trace!(
                         "no updates me {:?} ix {} since {}",
@@ -694,7 +695,7 @@ impl Crdt {
                 //TODO verify from is signed
                 obj.write().unwrap().insert(&from);
                 let me = obj.read().unwrap().my_data().clone();
-                trace!(
+                info!(
                     "received RequestWindowIndex {} {} myaddr {}",
                     ix,
                     from.repair_addr,
@@ -756,7 +757,10 @@ impl Crdt {
                         "run_listen timeout, table size: {}",
                         obj.read().unwrap().table.len()
                     );
-                }
+                } /*else {
+                    info!(
+                        "run_listen success!");
+                }*/
                 if exit.load(Ordering::Relaxed) {
                     return;
                 }
