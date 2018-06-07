@@ -99,9 +99,10 @@ impl BankingStage {
         static mut COUNTER: Counter = create_counter!("banking_stage_process_packets", 1);
         let proc_start = Instant::now();
         for (msgs, vers) in mms {
+            let ser_start = Instant::now();
             let transactions = Self::deserialize_transactions(&msgs.read().unwrap());
             reqs_len += transactions.len();
-            let transactions = transactions
+            let transactions: Vec<Transaction> = transactions
                 .into_iter()
                 .zip(vers)
                 .filter_map(|(tx, ver)| match tx {
@@ -114,11 +115,12 @@ impl BankingStage {
                 })
                 .collect();
 
-            debug!("process_transactions");
+            trace!("process_transactions {}", transactions.len());
             let results = bank.process_transactions(transactions);
-            let transactions = results.into_iter().filter_map(|x| x.ok()).collect();
+            trace!("done process_transactions {}", results.len());
+            let transactions: Vec<_> = results.into_iter().filter_map(|x| x.ok()).collect();
+            trace!("done filter_ok {}", transactions.len());
             signal_sender.send(Signal::Transactions(transactions))?;
-            debug!("done process_transactions");
 
             packet_recycler.recycle(msgs);
         }

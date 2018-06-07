@@ -464,21 +464,21 @@ fn broadcast(
             let ix = b.read().unwrap().get_index().expect("blob index");
             let pos = (ix as usize) % WINDOW_SIZE;
             if let Some(x) = &win[pos] {
-                trace!(
+                debug!(
                     "popped {} at {}",
                     x.read().unwrap().get_index().unwrap(),
                     pos
                 );
                 recycler.recycle(x.clone());
             }
-            trace!("null {}", pos);
+            debug!("null {}", pos);
             win[pos] = None;
             assert!(win[pos].is_none());
         }
         while let Some(b) = blobs.pop() {
             let ix = b.read().unwrap().get_index().expect("blob index");
             let pos = (ix as usize) % WINDOW_SIZE;
-            trace!("caching {} at {}", ix, pos);
+            debug!("caching {} at {}", ix, pos);
             assert!(win[pos].is_none());
             win[pos] = Some(b);
         }
