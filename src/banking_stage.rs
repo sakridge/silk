@@ -280,9 +280,108 @@ mod bench {
     use std::sync::mpsc::channel;
     use std::sync::Arc;
     use transaction::Transaction;
+    use rayon::prelude::*;
 
     #[bench]
-    fn bench_stage(bencher: &mut Bencher) {
+    fn bench_banking_stage_multi_accounts(bencher: &mut Bencher) {
+        logger::setup();
+        let tx = 30_000_usize;
+        let mint_total = 1_000_000_000_000;
+        let mint = Mint::new(mint_total);
+        let num_dst_accounts = 8 * 1024;
+        let num_src_accounts = 8 * 1024;
+
+        let srckeys: Vec<_> = (0..num_src_accounts).map(|_| { KeyPair::new() }).collect();
+        let dstkeys: Vec<_> = (0..num_dst_accounts).map(|_| { KeyPair::new().pubkey() }).collect();
+
+        info!("created keys src: {} dst: {}", srckeys.len(), dstkeys.len());
+
+        let transactions: Vec<_> = (0..tx)
+            .map(|i| {
+                Transaction::new(
+                    &srckeys[i % num_src_accounts],
+                    dstkeys[i % num_dst_accounts],
+                    i as i64,
+                    mint.last_id(),
+                )
+            })
+            .collect();
+
+        info!("created transactions");
+
+        let (verified_sender, verified_receiver) = channel();
+        let (signal_sender, signal_receiver) = channel();
+        let packet_recycler = PacketRecycler::default();
+        let verified: Vec<_> = to_packets_chunked(&packet_recycler, transactions, tx)
+            .into_iter()
+            .map(|x| {
+                let len = (*x).read().unwrap().packets.len();
+                (x, iter::repeat(1).take(len).collect())
+            })
+            .collect();
+
+        let setup_transactions: Vec<_> = (0..num_src_accounts)
+            .map(|i| {
+                Transaction::new(
+                    &mint.keypair(),
+                    srckeys[i].pubkey(),
+                    mint_total / num_src_accounts as i64,
+                    mint.last_id(),
+                )
+            })
+            .collect();
+
+        let verified_setup: Vec<_> = to_packets_chunked(&packet_recycler, setup_transactions, tx)
+            .into_iter()
+            .map(|x| {
+                let len = (*x).read().unwrap().packets.len();
+                (x, iter::repeat(1).take(len).collect())
+            })
+            .collect();
+
+        bencher.iter(move || {
+            let bank = Arc::new(Bank::new(&mint));
+
+            verified_sender.send(verified_setup.clone()).unwrap();
+            BankingStage::process_packets(
+                bank.clone(),
+                &verified_receiver,
+                &signal_sender,
+                &packet_recycler,
+            ).unwrap();
+            let mut total = 0;
+            for _ in 0..verified_setup.len() {
+                let signal = signal_receiver.recv().unwrap();
+                if let Signal::Transactions(transactions) = signal {
+                    total += transactions.len();
+                } else {
+                    assert!(false);
+                }
+            }
+            assert_eq!(total, num_src_accounts);
+
+            verified_sender.send(verified.clone()).unwrap();
+            BankingStage::process_packets(
+                bank.clone(),
+                &verified_receiver,
+                &signal_sender,
+                &packet_recycler,
+            ).unwrap();
+            let mut total = 0;
+            for _ in 0..verified.len() {
+                let signal = signal_receiver.recv().unwrap();
+                if let Signal::Transactions(transactions) = signal {
+                    total += transactions.len();
+                } else {
+                    assert!(false);
+                }
+            }
+            assert_eq!(total, tx);
+        });
+    }
+
+    #[bench]
+    fn bench_banking_stage_single_from(bencher: &mut Bencher) {
         logger::setup();
         let tx = 20_000_usize;
         let mint = Mint::new(1_000_000_000_000);
@@ -293,6 +392,7 @@ mod bench {
         }
 
         let transactions: Vec<_> = (0..tx)
+            .into_par_iter()
             .map(|i| {
                 Transaction::new(
                     &mint.keypair(),
@@ -335,4 +435,5 @@ mod bench {
             assert_eq!(total, tx);
         });
     }
+
 }
