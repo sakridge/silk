@@ -16,10 +16,12 @@ use std::collections::hash_map::Entry::Occupied;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::result;
 use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 use transaction::{Instruction, Plan, Transaction};
 use std::time::Instant;
 use std::cell::Cell;
+use std::thread::{Builder, JoinHandle};
+use rayon;
 
 /// The number of most recent `last_id` values that the bank will track the signatures
 /// of. Once the bank discards a `last_id`, it will reject any transactions that use
@@ -59,7 +61,7 @@ pub type Result<T> = result::Result<T, BankError>;
 /// The state of all accounts and contracts after processing its entries.
 pub struct Bank {
     /// A map of account public keys to the balance in that account.
-    balances: RwLock<HashMap<PublicKey, i64>>,
+    balances: RwLock<Vec<RwLock<HashMap<PublicKey, i64>>>>,
     //balances: RwLock<HashMap<PublicKey, RwLock<i64>>>,
     //balances: RwLock<HashMap<PublicKey, AtomicIsize>>,
 
@@ -93,15 +95,26 @@ pub struct Bank {
 impl Bank {
     /// Create an Bank using a deposit.
     pub fn new_from_deposit(deposit: &Payment) -> Self {
-        let bank = Bank {
-            balances: RwLock::new(HashMap::new()),
+        let mut bank = Bank {
+            balances: RwLock::new(Vec::new()),
             pending: RwLock::new(HashMap::new()),
             last_ids: RwLock::new(VecDeque::new()),
             time_sources: RwLock::new(HashSet::new()),
             last_time: RwLock::new(Utc.timestamp(0, 0)),
             transaction_count: AtomicUsize::new(0),
         };
-        bank.apply_payment(deposit, &mut bank.balances.write().unwrap());
+        {
+            let mut bals = bank.balances.write().unwrap();
+            for _ in 0..4 {
+                bals.push(RwLock::new(HashMap::new()));
+            }
+        }
+        let balance_table = bank.get_balance_table(&deposit.to);
+        {
+            let bals_l = bank.balances.read().unwrap();
+            let mut bals = bals_l[balance_table].write().unwrap();
+            bank.apply_payment(deposit, &mut bals);
+        }
         bank
     }
 
@@ -114,6 +127,10 @@ impl Bank {
         let bank = Self::new_from_deposit(&deposit);
         bank.register_entry_id(&mint.last_id());
         bank
+    }
+
+    fn get_balance_table(&self, pubkey: &PublicKey) -> usize {
+        (pubkey[0] & 0x3) as usize
     }
 
     fn apply_payment(&self, payment: &Payment, balances: &mut HashMap<PublicKey, i64>) {
@@ -302,7 +319,7 @@ impl Bank {
         }
     }*/
 
-    fn apply_credits(&self, tx: &Transaction, balances: &mut HashMap<PublicKey, i64>) {
+    fn apply_credits(&self, tx: &Transaction) {
         match &tx.instruction {
             Instruction::NewContract(contract) => {
                 let mut plan = contract.plan.clone();
@@ -311,7 +328,10 @@ impl Bank {
                     .expect("timestamp creation in apply_credits")));
 
                 if let Some(payment) = plan.final_payment() {
-                    self.apply_payment(&payment, balances);
+                    let balance_table = self.get_balance_table(&payment.to);
+                    let bals_l = self.balances.read().unwrap();
+                    let bals = &mut bals_l[balance_table].write().unwrap();
+                    self.apply_payment(&payment, bals);
                 } else {
                     let mut pending = self.pending
                         .write()
@@ -331,9 +351,12 @@ impl Bank {
     /// Process a Transaction. If it contains a payment plan that requires a witness
     /// to progress, the payment plan will be stored in the bank.
     fn process_transaction(&self, tx: &Transaction) -> Result<()> {
-        let bals = &mut self.balances.write().unwrap();
+        let balance_table = self.get_balance_table(&tx.from);
+        let bals_l = self.balances.read().unwrap();
+        let bals = &mut bals_l[balance_table].write().unwrap();
         self.apply_debits(tx, bals)?;
-        self.apply_credits(tx, bals);
+
+        self.apply_credits(tx);
         Ok(())
     }
 
@@ -342,24 +365,56 @@ impl Bank {
     pub fn process_transactions(&self, txs: Vec<Transaction>) -> Vec<Result<Transaction>> {
         // Run all debits first to filter out any transactions that can't be processed
         // in parallel deterministically.
-        let bals = &mut self.balances.write().unwrap();
         info!("processing Transactions {}", txs.len());
         let now = Instant::now();
-        let results: Vec<_> = txs.into_iter()
-            .map(|tx| self.apply_debits(&tx, bals).map(|_| tx))
-            .collect(); // Calling collect() here forces all debits to complete before moving on.
+        let mut results = Arc::new(RwLock::new(Vec::new()));
+        rayon::scope(|s| {
+            for i in 0..4 {
+                s.spawn(|_| {
+                    let bals_l = self.balances.read().unwrap();
+                    let bals = &mut bals_l[i].write().unwrap();
+                    let mut res = Vec::new();
+                    for tx in txs {
+                        if self.get_balance_table(&tx.from) == i {
+                            if self.apply_debits(&tx, bals).is_ok() {
+                                res.push(Ok(tx));
+                            }
+                        }
+                    }
+                    results.write().unwrap().push(res);
+                });
+            }
+        });
+
+        /*let results: Vec<_> = txs.into_par_iter()
+            .map(|tx| {
+                if self.get_balance_table(tx.to) == 
+                self.apply_debits(&tx, bals).map(|_| tx)
+            })
+            .collect(); // Calling collect() here forces all debits to complete before moving on.*/
 
         info!("debits: {:?}", now.elapsed());
 
-        let res: Vec<_> = results
+        let mut res = Vec::new();
+        let results_l = results.read().unwrap();
+        for vr in results_l.iter() {
+            for r in vr {
+                if let Ok(ref tx) = r {
+                    self.apply_credits(tx);
+                }
+                res.push(*r);
+            }
+        }
+
+        /*let res: Vec<_> = results
             .into_iter()
             .map(|result| {
                 result.map(|tx| {
-                    self.apply_credits(&tx, bals);
+                    self.apply_credits(&tx);
                     tx
                 })
             })
-            .collect();
+            .collect();*/
         let mut tr_count = 0;
         for r in &res {
             if r.is_ok() {
@@ -395,7 +450,12 @@ impl Bank {
         {
             e.get_mut().apply_witness(&Witness::Signature(from));
             if let Some(payment) = e.get().final_payment() {
-                self.apply_payment(&payment, &mut self.balances.write().unwrap());
+
+                let balance_table = self.get_balance_table(&payment.to);
+                let bals_l = self.balances.read().unwrap();
+                let mut bals = &mut bals_l[balance_table].write().unwrap();
+
+                self.apply_payment(&payment, &mut bals);
                 e.remove_entry();
             }
         };
@@ -444,7 +504,11 @@ impl Bank {
                 .read()
                 .expect("'last_time' read lock when creating timestamp")));
             if let Some(payment) = plan.final_payment() {
-                self.apply_payment(&payment, &mut self.balances.write().unwrap());
+                let balance_table = self.get_balance_table(&payment.to);
+                let bals_l = self.balances.read().unwrap();
+                let mut bals = &mut bals_l[balance_table].write().unwrap();
+
+                self.apply_payment(&payment, &mut bals);
                 completed.push(key.clone());
             }
         }
@@ -487,7 +551,9 @@ impl Bank {
     }
 
     pub fn get_balance(&self, pubkey: &PublicKey) -> Option<i64> {
-        let bals = self.balances
+        let bal_table = self.get_balance_table(pubkey);
+        let bals_l = self.balances.read().unwrap();
+        let bals = bals_l[bal_table]
             .read()
             .expect("'balances' read lock in get_balance");
         //bals.get(pubkey).map(|x| x.load(Ordering::Relaxed) as i64)
