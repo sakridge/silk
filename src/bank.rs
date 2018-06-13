@@ -32,7 +32,7 @@ use rayon;
 pub const MAX_ENTRY_IDS: usize = 1024 * 4;
 
 /// Reasons a transaction might be rejected.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum BankError {
     /// Attempt to debit from `PublicKey`, but no found no record of a prior credit.
     AccountNotFound(PublicKey),
@@ -92,6 +92,8 @@ pub struct Bank {
     transaction_count: AtomicUsize,
 }
 
+const THREAD_COUNT: usize = 8;
+
 impl Bank {
     /// Create an Bank using a deposit.
     pub fn new_from_deposit(deposit: &Payment) -> Self {
@@ -105,7 +107,7 @@ impl Bank {
         };
         {
             let mut bals = bank.balances.write().unwrap();
-            for _ in 0..4 {
+            for _ in 0..THREAD_COUNT {
                 bals.push(RwLock::new(HashMap::new()));
             }
         }
@@ -130,7 +132,8 @@ impl Bank {
     }
 
     fn get_balance_table(&self, pubkey: &PublicKey) -> usize {
-        (pubkey[0] & 0x3) as usize
+        (pubkey[0] & (THREAD_COUNT as u8 - 1)) as usize
+        //(pubkey[0] % (THREAD_COUNT as u8)) as usize
     }
 
     fn apply_payment(&self, payment: &Payment, balances: &mut HashMap<PublicKey, i64>) {
@@ -330,8 +333,8 @@ impl Bank {
                 if let Some(payment) = plan.final_payment() {
                     let balance_table = self.get_balance_table(&payment.to);
                     let bals_l = self.balances.read().unwrap();
-                    let bals = &mut bals_l[balance_table].write().unwrap();
-                    self.apply_payment(&payment, bals);
+                    let mut bals = bals_l[balance_table].write().unwrap();
+                    self.apply_payment(&payment, &mut bals);
                 } else {
                     let mut pending = self.pending
                         .write()
@@ -353,8 +356,8 @@ impl Bank {
     fn process_transaction(&self, tx: &Transaction) -> Result<()> {
         let balance_table = self.get_balance_table(&tx.from);
         let bals_l = self.balances.read().unwrap();
-        let bals = &mut bals_l[balance_table].write().unwrap();
-        self.apply_debits(tx, bals)?;
+        let mut bals = bals_l[balance_table].write().unwrap();
+        self.apply_debits(tx, &mut bals)?;
 
         self.apply_credits(tx);
         Ok(())
@@ -362,29 +365,30 @@ impl Bank {
 
     /// Process a batch of transactions. It runs all debits first to filter out any
     /// transactions that can't be processed in parallel deterministically.
-    pub fn process_transactions(&self, txs: Vec<Transaction>) -> Vec<Result<Transaction>> {
+    pub fn process_transactions(&self, txs: &Vec<Transaction>) -> Vec<Result<()>> {
         // Run all debits first to filter out any transactions that can't be processed
         // in parallel deterministically.
         info!("processing Transactions {}", txs.len());
         let now = Instant::now();
-        let mut results = Arc::new(RwLock::new(Vec::new()));
-        rayon::scope(|s| {
-            for i in 0..4 {
-                s.spawn(|_| {
-                    let bals_l = self.balances.read().unwrap();
-                    let bals = &mut bals_l[i].write().unwrap();
-                    let mut res = Vec::new();
-                    for tx in txs {
-                        if self.get_balance_table(&tx.from) == i {
-                            if self.apply_debits(&tx, bals).is_ok() {
-                                res.push(Ok(tx));
+        let mut results = vec![Ok(()); txs.len()];
+        let mut counts = vec![0; THREAD_COUNT];
+        for i in 0..THREAD_COUNT {
+            rayon::scope(|s| {
+                    s.spawn(|_| {
+                        let bals_l = self.balances.read().unwrap();
+                        let mut bals = bals_l[i].write().unwrap();
+                        for (j, tx) in txs.into_iter().enumerate() {
+                            if self.get_balance_table(&tx.from) == i {
+                                results[j] = self.apply_debits(&tx, &mut bals);
+                                counts[i] += 1;
                             }
                         }
-                    }
-                    results.write().unwrap().push(res);
-                });
-            }
-        });
+                        //results.write().unwrap().push(res);
+                    });
+            });
+        }
+
+        info!("thread counts: {:?}", counts);
 
         /*let results: Vec<_> = txs.into_par_iter()
             .map(|tx| {
@@ -395,15 +399,15 @@ impl Bank {
 
         info!("debits: {:?}", now.elapsed());
 
-        let mut res = Vec::new();
-        let results_l = results.read().unwrap();
-        for vr in results_l.iter() {
-            for r in vr {
-                if let Ok(ref tx) = r {
-                    self.apply_credits(tx);
-                }
-                res.push(*r);
+        //let mut res = Vec::new();
+        let mut tr_count = 0;
+        //let results_l = results.read().unwrap();
+        for (i, vr) in results.iter().enumerate() {
+            if vr.is_ok() {
+                self.apply_credits(&txs[i]);
+                tr_count += 1;
             }
+            //res.push(*r);
         }
 
         /*let res: Vec<_> = results
@@ -415,15 +419,14 @@ impl Bank {
                 })
             })
             .collect();*/
-        let mut tr_count = 0;
-        for r in &res {
+        /*for vr in &res {
             if r.is_ok() {
-                tr_count += 1;
             }
-        }
+        }*/
         self.transaction_count.fetch_add(tr_count, Ordering::Relaxed);
         info!("credits: {:?}", now.elapsed());
-        res
+        //res
+        results
     }
 
     /// Process an ordered list of entries.
@@ -432,8 +435,10 @@ impl Bank {
         I: IntoIterator<Item = Entry>,
     {
         for entry in entries {
-            for result in self.process_transactions(entry.transactions) {
-                result?;
+            for result in self.process_transactions(&entry.transactions) {
+                //for res in result {
+                //    res?;
+                //}
             }
             self.register_entry_id(&entry.id);
         }
@@ -453,7 +458,7 @@ impl Bank {
 
                 let balance_table = self.get_balance_table(&payment.to);
                 let bals_l = self.balances.read().unwrap();
-                let mut bals = &mut bals_l[balance_table].write().unwrap();
+                let mut bals = bals_l[balance_table].write().unwrap();
 
                 self.apply_payment(&payment, &mut bals);
                 e.remove_entry();
@@ -506,7 +511,7 @@ impl Bank {
             if let Some(payment) = plan.final_payment() {
                 let balance_table = self.get_balance_table(&payment.to);
                 let bals_l = self.balances.read().unwrap();
-                let mut bals = &mut bals_l[balance_table].write().unwrap();
+                let mut bals = bals_l[balance_table].write().unwrap();
 
                 self.apply_payment(&payment, &mut bals);
                 completed.push(key.clone());
@@ -775,7 +780,7 @@ mod tests {
         let tx0 = Transaction::new(&mint.keypair(), keypair.pubkey(), 2, mint.last_id());
         let tx1 = Transaction::new(&keypair, mint.pubkey(), 1, mint.last_id());
         let txs = vec![tx0, tx1];
-        let results = bank.process_transactions(txs);
+        let results = bank.process_transactions(&txs);
         assert!(results[1].is_err());
 
         // Assert bad transactions aren't counted.
@@ -824,7 +829,7 @@ mod bench {
             }
 
             assert!(
-                bank.process_transactions(transactions.clone())
+                bank.process_transactions(&transactions.clone())
                     .iter()
                     .all(|x| x.is_ok())
             );

@@ -116,11 +116,17 @@ impl BankingStage {
                 .collect();
 
             trace!("process_transactions {}", transactions.len());
-            let results = bank.process_transactions(transactions);
+            let results = bank.process_transactions(&transactions);
             trace!("done process_transactions {}", results.len());
-            let transactions: Vec<_> = results.into_iter().filter_map(|x| x.ok()).collect();
-            trace!("done filter_ok {}", transactions.len());
-            signal_sender.send(Signal::Transactions(transactions))?;
+            //let transactions: Vec<_> = results.into_iter().filter_map(|x| x.ok()).collect();
+            //trace!("done filter_ok {}", transactions.len());
+            let mut ok_transactions = Vec::new();
+            for (res, tx) in results.iter().zip(transactions.into_iter()) {
+                if res.is_ok() {
+                    ok_transactions.push(tx);
+                }
+            }
+            signal_sender.send(Signal::Transactions(ok_transactions))?;
 
             packet_recycler.recycle(msgs);
         }
