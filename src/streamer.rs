@@ -456,6 +456,9 @@ fn broadcast(
     let blobs_len = blobs.len();
     info!("broadcast blobs.len: {}", blobs_len);
 
+    let blobs_len = blobs.len();
+    info!("broadcast blobs.len: {}", blobs_len);
+
     // Index the blobs
     Crdt::index_blobs(crdt, &blobs, receive_index)?;
     // keep the cache of blobs that are broadcast
@@ -528,6 +531,7 @@ pub fn broadcaster(
             let mut transmit_index = 0;
             let mut receive_index = 0;
             loop {
+                break;
                 if exit.load(Ordering::Relaxed) {
                     break;
                 }

@@ -34,6 +34,10 @@ impl SigVerifyStage {
 
     fn verify_batch(batch: Vec<SharedPackets>) -> Vec<(SharedPackets, Vec<u8>)> {
         let r = sigverify::ed25519_verify(&batch);
+        /*let mut r = Vec::new();
+        for x in &batch {
+            r.push(vec![1; x.read().unwrap().packets.len()]);
+        }*/
         batch.into_iter().zip(r).collect()
     }
 

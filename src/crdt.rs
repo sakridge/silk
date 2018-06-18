@@ -311,6 +311,7 @@ impl Crdt {
             blob.set_id(me.id).expect("set_id in pub fn broadcast");
             blob.set_index(*receive_index + i as u64)
                 .expect("set_index in pub fn broadcast");
+            debug!("blob set index: {}", blob.get_index().unwrap());
         }
 
         Ok(())

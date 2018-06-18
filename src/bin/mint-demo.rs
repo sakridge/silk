@@ -21,8 +21,8 @@ fn main() {
     let tokens = trimmed.parse::<i64>().unwrap();
 
     let mint = Mint::new(tokens);
-    let tokens_per_user = 1_000;
-    let num_accounts = tokens / tokens_per_user;
+    let tokens_per_user = tokens / 2;
+    let num_accounts = mint.tokens / tokens_per_user;
 
     let demo = MintDemo { mint, num_accounts };
     println!("{}", serde_json::to_string(&demo).unwrap());
