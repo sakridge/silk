@@ -41,26 +41,12 @@ impl Block for [Entry] {
     }
 }
 
-pub fn reconstruct_entries_from_blobs(
-    blobs: VecDeque<SharedBlob>,
-    blob_recycler: &packet::BlobRecycler,
-) -> bincode::Result<Vec<Entry>> {
+pub fn reconstruct_entries_from_blobs(blobs: &VecDeque<SharedBlob>) -> bincode::Result<Vec<Entry>> {
     let mut entries: Vec<Entry> = Vec::with_capacity(blobs.len());
-
-    for blob in blobs {
-        let entry = {
-            let msg = blob.read().unwrap();
-            deserialize(&msg.data()[..msg.meta.size])
-        };
-        blob_recycler.recycle(blob);
-
-        match entry {
-            Ok(entry) => entries.push(entry),
-            Err(err) => {
-                trace!("reconstruct_entry_from_blobs: {}", err);
-                return Err(err);
-            }
-        }
+    for msgs in blobs {
+        let blob = msgs.read().unwrap();
+        let entry: Entry = deserialize(&blob.data()[..blob.meta.size])?;
+        entries.push(entry);
     }
     Ok(entries)
 }
@@ -162,10 +148,7 @@ mod tests {
         let mut blob_q = VecDeque::new();
         entries.to_blobs(&blob_recycler, &mut blob_q);
 
-        assert_eq!(
-            reconstruct_entries_from_blobs(blob_q, &blob_recycler).unwrap(),
-            entries
-        );
+        assert_eq!(reconstruct_entries_from_blobs(&blob_q).unwrap(), entries);
     }
 
     #[test]
@@ -173,7 +156,7 @@ mod tests {
         let blob_recycler = BlobRecycler::default();
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 8000);
         let blobs_q = packet::to_blobs(vec![(0, addr)], &blob_recycler).unwrap(); // <-- attack!
-        assert!(reconstruct_entries_from_blobs(blobs_q, &blob_recycler).is_err());
+        assert!(reconstruct_entries_from_blobs(&blobs_q).is_err());
     }
 
     #[test]
@@ -223,10 +206,10 @@ mod bench {
         bencher.iter(|| {
             let mut blob_q = VecDeque::new();
             entries.to_blobs(&blob_recycler, &mut blob_q);
-            assert_eq!(
-                reconstruct_entries_from_blobs(blob_q, &blob_recycler).unwrap(),
-                entries
-            );
+            assert_eq!(reconstruct_entries_from_blobs(&blob_q).unwrap(), entries);
+            for blob in blob_q {
+                blob_recycler.recycle(blob);
+            }
         });
     }
 

@@ -3,7 +3,6 @@
 
 use entry::Entry;
 use hash::{hash, Hash};
-use ledger::next_entries_mut;
 use std::time::{Duration, Instant};
 use transaction::Transaction;
 
@@ -27,19 +26,15 @@ impl Recorder {
         self.num_hashes += 1;
     }
 
-    pub fn record(&mut self, transactions: Vec<Transaction>) -> Vec<Entry> {
-        next_entries_mut(&mut self.last_hash, &mut self.num_hashes, transactions)
+    pub fn record(&mut self, transactions: Vec<Transaction>) -> Entry {
+        Entry::new_mut(&mut self.last_hash, &mut self.num_hashes, transactions)
     }
 
     pub fn tick(&mut self, start_time: Instant, tick_duration: Duration) -> Option<Entry> {
         if start_time.elapsed() > tick_duration * (self.num_ticks + 1) {
             // TODO: don't let this overflow u32
             self.num_ticks += 1;
-            Some(Entry::new_mut(
-                &mut self.last_hash,
-                &mut self.num_hashes,
-                vec![],
-            ))
+            Some(self.record(vec![]))
         } else {
             None
         }
