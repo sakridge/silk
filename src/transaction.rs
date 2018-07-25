@@ -230,7 +230,7 @@ pub fn memfind<A: Eq>(a: &[A], b: &[A]) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bincode::{deserialize, serialize};
+    use bincode::{deserialize, serialize, serialized_size};
 
     #[test]
     fn test_claim() {
@@ -342,5 +342,23 @@ mod tests {
             }
         }
         assert!(!tx.verify_plan());
+    }
+
+    #[test]
+    fn test_serialized_size() {
+        let keypair0 = KeyPair::new();
+        let keypair1 = KeyPair::new();
+        let zero = Hash::default();
+        let tx = Transaction::new(&keypair0, keypair1.pubkey(), 1, zero);
+        let dt = Utc::now();
+        let tx_ts = Transaction::new_timestamp(&keypair0, dt, zero);
+        let vote = Vote { version: 0, contact_info_version: 2 };
+        let tx_vote = Transaction::new_vote(&keypair0, vote, zero, 2);
+
+        assert_eq!(serialized_size(&tx).unwrap(),
+                   serialized_size(&tx_ts).unwrap());
+        assert_eq!(serialized_size(&tx).unwrap(),
+                   serialized_size(&tx_vote).unwrap());
+
     }
 }
