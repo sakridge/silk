@@ -328,7 +328,11 @@ impl Crdt {
         &self.table[&self.me]
     }
     pub fn leader_data(&self) -> Option<&NodeInfo> {
-        self.table.get(&(self.table[&self.me].leader_id))
+        let leader_id = self.table[&self.me].leader_id;
+        if leader_id == PublicKey::default() {
+            return None;
+        }
+        self.table.get(&leader_id)
     }
 
     pub fn set_leader(&mut self, key: PublicKey) -> () {
