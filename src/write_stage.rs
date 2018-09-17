@@ -36,33 +36,45 @@ impl WriteStage {
         blob_recycler: &BlobRecycler,
         entry_receiver: &Receiver<Vec<Entry>>,
     ) -> Result<()> {
+        let mut ventries = Vec::new();
         let entries = entry_receiver.recv_timeout(Duration::new(1, 0))?;
+        let mut num_entries = entries.len();
 
-        let votes = &entries.votes();
-        crdt.write().unwrap().insert_votes(&votes);
-
-        ledger_writer.write_entries(entries.clone())?;
-
-        for entry in &entries {
-            if !entry.has_more {
-                bank.register_entry_id(&entry.id);
-            }
+        ventries.push(entries);
+        while let Ok(more) = entry_receiver.try_recv() {
+            num_entries += more.len();
+            ventries.push(more);
         }
 
-        inc_new_counter_info!("write_stage-write_entries", entries.len());
+        info!("write_stage entries: {}", num_entries);
 
-        //TODO(anatoly): real stake based voting needs to change this
-        //leader simply votes if the current set of validators have voted
-        //on a valid last id
+        for entries in &ventries {
+            let votes = &entries.votes();
+            crdt.write().unwrap().insert_votes(&votes);
 
-        trace!("New blobs? {}", entries.len());
-        let blobs = entries.to_blobs(blob_recycler);
+            ledger_writer.write_entries(entries.clone())?;
 
-        if !blobs.is_empty() {
-            inc_new_counter_info!("write_stage-recv_vote", votes.len());
-            inc_new_counter_info!("write_stage-broadcast_blobs", blobs.len());
-            trace!("broadcasting {}", blobs.len());
-            blob_sender.send(blobs)?;
+            for entry in entries.iter() {
+                if !entry.has_more {
+                    bank.register_entry_id(&entry.id);
+                }
+            }
+
+            inc_new_counter_info!("write_stage-write_entries", entries.len());
+
+            //TODO(anatoly): real stake based voting needs to change this
+            //leader simply votes if the current set of validators have voted
+            //on a valid last id
+
+            trace!("New blobs? {}", entries.len());
+            let blobs = entries.to_blobs(blob_recycler);
+
+            if !blobs.is_empty() {
+                inc_new_counter_info!("write_stage-recv_vote", votes.len());
+                inc_new_counter_info!("write_stage-broadcast_blobs", blobs.len());
+                trace!("broadcasting {}", blobs.len());
+                blob_sender.send(blobs)?;
+            }
         }
         Ok(())
     }

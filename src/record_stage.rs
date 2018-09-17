@@ -27,6 +27,14 @@ pub struct RecordStage {
     thread_hdl: JoinHandle<()>,
 }
 
+fn get_num_txs(signal: &Signal) -> usize {
+    if let Signal::Transactions(txs) = signal {
+        return txs.len();
+    } else {
+        return 0;
+    }
+}
+
 impl RecordStage {
     /// A background thread that will continue tagging received Transaction messages and
     /// sending back Entry messages until either the receiver or sender channel is closed.
@@ -107,7 +115,18 @@ impl RecordStage {
     ) -> Result<(), ()> {
         loop {
             match receiver.recv() {
-                Ok(signal) => Self::process_signal(signal, recorder, sender)?,
+                Ok(signal) => {
+                    let mut num_txs = get_num_txs(&signal);
+                    let mut signals = vec![signal];
+                    while let Ok(more) = receiver.try_recv() {
+                        num_txs += get_num_txs(&more);
+                        signals.push(more);
+                    }
+                    info!("record_stage txs: {}", num_txs);
+                    for signal in signals {
+                        Self::process_signal(signal, recorder, sender)?;
+                    }
+                },
                 Err(RecvError) => return Err(()),
             }
         }

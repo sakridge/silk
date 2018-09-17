@@ -73,7 +73,7 @@ impl Counter {
         }
         if times % lograte == 0 && times > 0 {
             let lastlog = self.lastlog.load(Ordering::Relaxed);
-            info!(
+            debug!(
                 "COUNTER:{{\"name\": \"{}\", \"counts\": {}, \"samples\": {},  \"now\": {}, \"events\": {}}}",
                 self.name,
                 counts + events,
