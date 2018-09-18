@@ -12,6 +12,7 @@ use packet::BlobRecycler;
 use result::{Error, Result};
 use service::Service;
 use signature::Keypair;
+use timing::{duration_as_ms, duration_as_s};
 use std::net::UdpSocket;
 use std::sync::atomic::AtomicUsize;
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError};
@@ -20,6 +21,7 @@ use std::thread::{self, Builder, JoinHandle};
 use std::time::Duration;
 use streamer::{responder, BlobReceiver, BlobSender};
 use vote_stage::send_leader_vote;
+use std::time::Instant;
 
 pub struct WriteStage {
     thread_hdls: Vec<JoinHandle<()>>,
@@ -39,6 +41,7 @@ impl WriteStage {
         let mut ventries = Vec::new();
         let entries = entry_receiver.recv_timeout(Duration::new(1, 0))?;
         let mut num_entries = entries.len();
+        let mut num_txs = 0;
 
         ventries.push(entries);
         while let Ok(more) = entry_receiver.try_recv() {
@@ -48,17 +51,30 @@ impl WriteStage {
 
         info!("write_stage entries: {}", num_entries);
 
+        let mut to_blobs_total = 0;
+        let mut blob_send_total = 0;
+        let mut register_entry_total = 0;
+        let mut crdt_votes_total = 0;
+
+        let start = Instant::now();
         for entries in &ventries {
+            for e in entries.iter() {
+                num_txs += e.transactions.len();
+            }
+            let crdt_votes_start = Instant::now();
             let votes = &entries.votes();
             crdt.write().unwrap().insert_votes(&votes);
+            crdt_votes_total += duration_as_ms(&crdt_votes_start.elapsed());
 
             ledger_writer.write_entries(entries.clone())?;
 
+            let register_entry_start = Instant::now();
             for entry in entries.iter() {
                 if !entry.has_more {
                     bank.register_entry_id(&entry.id);
                 }
             }
+            register_entry_total += duration_as_ms(&register_entry_start.elapsed());
 
             inc_new_counter_info!("write_stage-write_entries", entries.len());
 
@@ -66,16 +82,27 @@ impl WriteStage {
             //leader simply votes if the current set of validators have voted
             //on a valid last id
 
+            let to_blobs_start = Instant::now();
             trace!("New blobs? {}", entries.len());
             let blobs = entries.to_blobs(blob_recycler);
+            to_blobs_total += duration_as_ms(&to_blobs_start.elapsed());
 
+            let blob_send_start = Instant::now();
             if !blobs.is_empty() {
                 inc_new_counter_info!("write_stage-recv_vote", votes.len());
                 inc_new_counter_info!("write_stage-broadcast_blobs", blobs.len());
                 trace!("broadcasting {}", blobs.len());
                 blob_sender.send(blobs)?;
             }
+            blob_send_total += duration_as_ms(&blob_send_start.elapsed());
         }
+        info!("done write_stage txs: {} time {} ms txs/s: {} to_blobs_total: {} register_entry_total: {} blob_send_total: {} crdt_votes_total: {}",
+              num_txs, duration_as_ms(&start.elapsed()),
+              num_txs as f32 / duration_as_s(&start.elapsed()),
+              to_blobs_total,
+              register_entry_total,
+              blob_send_total,
+              crdt_votes_total);
         Ok(())
     }
 

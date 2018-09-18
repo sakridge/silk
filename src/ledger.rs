@@ -355,8 +355,8 @@ impl LedgerWriter {
         for entry in entries {
             self.write_entry_noflush(&entry)?;
         }
-        self.index.flush()?;
-        self.data.flush()?;
+        //self.index.flush()?;
+        //self.data.flush()?;
         Ok(())
     }
 }

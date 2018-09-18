@@ -4,7 +4,7 @@
 #
 
 # Default zone
-zone="us-west1-b"
+zone="us-east1-c"
 cloud_SetZone() {
   zone="$1"
 }
@@ -129,6 +129,7 @@ cloud_CreateInstances() {
     --image "$imageName"
     --maintenance-policy TERMINATE
     --no-restart-on-failure
+    --boot-disk-type=pd-ssd
   )
 
   # shellcheck disable=SC2206 # Do not want to quote $machineType as it may contain extra args
