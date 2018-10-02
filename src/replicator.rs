@@ -17,7 +17,7 @@ use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::channel;
 use std::sync::{Arc, RwLock};
-use std::thread::JoinHandle;
+use std::thread::{sleep, JoinHandle};
 use std::time::Duration;
 use store_ledger_stage::StoreLedgerStage;
 use streamer::BlobReceiver;
@@ -48,7 +48,7 @@ pub fn sample_file(in_path: &Path, sample_offsets: &[u64]) -> io::Result<Hash> {
             return Err(Error::new(ErrorKind::Other, "offset too large"));
         }
         buffer_file.seek(SeekFrom::Start(*offset * sample_size64))?;
-        info!("sampling @ {} ", *offset);
+        trace!("sampling @ {} ", *offset);
         match buffer_file.read(&mut buf) {
             Ok(size) => {
                 assert_eq!(size, buf.len());
@@ -73,7 +73,7 @@ impl Replicator {
         node: Node,
         network_addr: Option<SocketAddr>,
         done: Arc<AtomicBool>,
-    ) -> Replicator {
+    ) -> (Replicator, NodeInfo) {
         let window = window::new_window_from_entries(&[], entry_height, &node.info);
         let shared_window = Arc::new(RwLock::new(window));
 
@@ -82,6 +82,7 @@ impl Replicator {
         let leader_info = network_addr.map(|i| NodeInfo::new_entry_point(&i));
 
         if let Some(leader_info) = leader_info.as_ref() {
+            info!("leader: {:?}", leader_info);
             crdt.write().unwrap().insert(leader_info);
         } else {
             panic!("No leader info!");
@@ -119,13 +120,31 @@ impl Replicator {
             exit.clone(),
         );
 
-        Replicator {
+        // Poll until we get updated with the leader
+        loop {
+            if crdt.read().unwrap().leader_data().is_some() {
+                break;
+            } else {
+                sleep(Duration::from_millis(500));
+                info!("waiting for leader...");
+                info!("{}", crdt.read().unwrap().node_info_trace());
+            }
+        }
+
+        let leader_data;
+        {
+            let rcrdt = crdt.read().unwrap();
+            leader_data = rcrdt.leader_data().unwrap().clone();
+        }
+
+        (Replicator {
             ncp,
             fetch_stage,
             store_ledger_stage,
             t_window,
             retransmit_receiver,
-        }
+        },
+        leader_data.clone())
     }
 
     pub fn join(self) {
@@ -206,7 +225,7 @@ mod tests {
 
         info!("starting replicator node");
         let replicator_node = Node::new_localhost_with_pubkey(replicator_keypair.pubkey());
-        let replicator = Replicator::new(
+        let (replicator, _leader_info) = Replicator::new(
             entry_height,
             1,
             &exit,

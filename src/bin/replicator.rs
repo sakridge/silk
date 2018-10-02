@@ -13,6 +13,9 @@ use solana::ledger::LEDGER_DATA_FILE;
 use solana::logger;
 use solana::replicator::{sample_file, Replicator};
 use solana::signature::{Keypair, KeypairUtil};
+use solana::storage_transaction::StorageTransaction;
+use solana::transaction::Transaction;
+use solana::client::mk_client;
 use std::fs::File;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;
@@ -90,7 +93,7 @@ fn main() {
     // TODO: ask network what slice we should store
     let entry_height = 0;
 
-    let replicator = Replicator::new(
+    let (replicator, leader_info) = Replicator::new(
         entry_height,
         5,
         &exit,
@@ -124,8 +127,15 @@ fn main() {
 
     let sampling_offsets = [0, 1, 2, 3];
 
+    let mut client = mk_client(&leader_info);
+
     match sample_file(&ledger_data_file_encrypted, &sampling_offsets) {
-        Ok(hash) => println!("sampled hash: {}", hash),
+        Ok(hash) => {
+            let last_id = client.get_last_id();
+            println!("sampled hash: {}", hash);
+            let tx = Transaction::storage_new_mining_proof(&keypair, hash, last_id);
+            client.transfer_signed(&tx).expect("transfer didn't work!");
+        }
         Err(e) => println!("Error occurred while sampling: {:?}", e),
     }
 
