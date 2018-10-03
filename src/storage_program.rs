@@ -3,10 +3,10 @@
 //!  and give reward for good proofs.
 
 use bincode::deserialize;
+use hash::Hash;
 use solana_program_interface::account::Account;
 use solana_program_interface::pubkey::Pubkey;
 use transaction::Transaction;
-use hash::Hash;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum StorageProgram {

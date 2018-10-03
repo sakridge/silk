@@ -137,14 +137,16 @@ impl Replicator {
             leader_data = rcrdt.leader_data().unwrap().clone();
         }
 
-        (Replicator {
-            ncp,
-            fetch_stage,
-            store_ledger_stage,
-            t_window,
-            retransmit_receiver,
-        },
-        leader_data.clone())
+        (
+            Replicator {
+                ncp,
+                fetch_stage,
+                store_ledger_stage,
+                t_window,
+                retransmit_receiver,
+            },
+            leader_data.clone(),
+        )
     }
 
     pub fn join(self) {
