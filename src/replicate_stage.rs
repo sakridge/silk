@@ -19,6 +19,7 @@ use std::time::Duration;
 use std::time::Instant;
 use streamer::{responder, BlobSender};
 use vote_stage::send_validator_vote;
+use storage_stage::StorageStage;
 
 // Implement a destructor for the ReplicateStage thread to signal it exited
 // even on panics
@@ -51,6 +52,9 @@ impl ReplicateStage {
         ledger_writer: Option<&mut LedgerWriter>,
         keypair: &Arc<Keypair>,
         vote_blob_sender: Option<&BlobSender>,
+        storage_stage: &mut StorageStage,
+        poh_height: &mut u64,
+        entry_height: &mut u64,
     ) -> Result<()> {
         let timer = Duration::new(1, 0);
         //coalesce all the available entries into a single vote
@@ -60,6 +64,8 @@ impl ReplicateStage {
         }
 
         let res = bank.process_entries(&entries);
+
+        storage_stage.process_entries(&entries, poh_height, entry_height);
 
         if let Some(sender) = vote_blob_sender {
             send_validator_vote(bank, keypair, crdt, sender)?;
@@ -99,6 +105,10 @@ impl ReplicateStage {
         let mut ledger_writer = ledger_path.map(|p| LedgerWriter::open(p, false).unwrap());
         let keypair = Arc::new(keypair);
 
+        let mut storage_stage = StorageStage::new();
+        let mut poh_height = 0;
+        let mut entry_height = 0;
+
         let t_replicate = Builder::new()
             .name("solana-replicate-stage".to_string())
             .spawn(move || {
@@ -121,6 +131,9 @@ impl ReplicateStage {
                         ledger_writer.as_mut(),
                         &keypair,
                         vote_sender,
+                        &mut storage_stage,
+                        &mut poh_height,
+                        &mut entry_height,
                     ) {
                         match e {
                             Error::RecvTimeoutError(RecvTimeoutError::Disconnected) => break,
