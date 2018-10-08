@@ -82,11 +82,34 @@ fn err_bincode_to_io(e: Box<bincode::ErrorKind>) -> io::Error {
     io::Error::new(io::ErrorKind::Other, e.to_string())
 }
 
-fn entry_at<A: Read + Seek>(file: &mut A, at: u64) -> io::Result<Entry> {
+fn entry_len_at<A: Read + Seek>(file: &mut A, at: u64) -> io::Result<u64> {
     file.seek(SeekFrom::Start(at))?;
 
     let len = deserialize_from(file.take(SIZEOF_U64)).map_err(err_bincode_to_io)?;
     trace!("entry_at({}) len: {}", at, len);
+
+    Ok(len)
+}
+
+fn raw_entries_at<A: Read + Seek>(file: &mut A, at: u64, num_entries: u64, buf: &mut [u8]) -> io::Result<(u64, u64)> {
+    let mut total_read = 0;
+    let mut num_entries_read = 0;
+    for _ in 0..num_entries {
+        let len = entry_len_at(file, at)? as usize;
+        let buf_left = buf.len() - total_read;
+        if len > buf_left {
+            break;
+        }
+
+        file.read(&mut buf[total_read..(total_read + len)])?;
+        total_read += len;
+        num_entries_read += 1;
+    }
+    Ok((num_entries_read, total_read as u64))
+}
+
+fn entry_at<A: Read + Seek>(file: &mut A, at: u64) -> io::Result<Entry> {
+    let len = entry_len_at(file, at)?;
 
     deserialize_from(file.take(len)).map_err(err_bincode_to_io)
 }
@@ -116,8 +139,20 @@ impl LedgerWindow {
     }
 
     pub fn get_entry(&mut self, index: u64) -> io::Result<Entry> {
-        let offset = u64_at(&mut self.index, index * SIZEOF_U64)?;
+        let offset = self.get_entry_offset(index)?;
         entry_at(&mut self.data, offset)
+    }
+
+    // Fill 'buf' with num_entries or most number of whole entries that fit into buf.len()
+    //
+    // Return tuple of (number of entries read, total size of entries read)
+    pub fn get_entries_bytes(&mut self, start_index: u64, num_entries: u64, buf: &mut [u8]) -> io::Result<(u64, u64)> {
+        let start_offset = self.get_entry_offset(start_index)?;
+        raw_entries_at(&mut self.data, start_offset, num_entries, buf)
+    }
+
+    fn get_entry_offset(&mut self, index: u64) -> io::Result<u64> {
+        u64_at(&mut self.index, index * SIZEOF_U64)
     }
 }
 
@@ -386,6 +421,16 @@ impl Iterator for LedgerReader {
     }
 }
 
+impl LedgerReader {
+    pub fn new(ledger_path: &str) -> io::Result<Self> {
+        let ledger_path = Path::new(&ledger_path);
+        let data = File::open(ledger_path.join(LEDGER_DATA_FILE))?;
+        let data = BufReader::new(data);
+
+        Ok(LedgerReader { data })
+    }
+}
+
 /// Return an iterator for all the entries in the given file.
 pub fn read_ledger(
     ledger_path: &str,
@@ -395,11 +440,7 @@ pub fn read_ledger(
         recover_ledger(ledger_path)?;
     }
 
-    let ledger_path = Path::new(&ledger_path);
-    let data = File::open(ledger_path.join(LEDGER_DATA_FILE))?;
-    let data = BufReader::new(data);
-
-    Ok(LedgerReader { data })
+    LedgerReader::new(ledger_path)
 }
 
 // a Block is a slice of Entries
