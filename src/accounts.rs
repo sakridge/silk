@@ -3,8 +3,8 @@ use crate::bank::Result;
 use crate::checkpoint::Checkpoint;
 use crate::counter::Counter;
 use crate::status_deque::{StatusDeque, StatusDequeError};
-use bincode::serialize;
-use hashbrown::{HashMap, HashSet};
+use bincode::{serialize, deserialize, serialized_size};
+use std::collections::{HashMap, HashSet};
 use log::Level;
 use solana_sdk::account::Account;
 use solana_sdk::hash::{hash, Hash};
@@ -75,6 +75,48 @@ impl AccountsDB {
         self.accounts.keys().cloned().collect()
     }
 
+    pub fn deserialize(&mut self, snapshot: &[u8]) {
+        let mut current = 0;
+        let size: u64 = deserialize(&snapshot[..8]).unwrap();
+        current += 8;
+        let size = size as usize;
+
+        self.checkpoints = deserialize(&snapshot[current..current + size]).unwrap();
+        current += size;
+
+        let size: u64 = deserialize(&snapshot[current..current + 8]).unwrap();
+        let size = size as usize;
+        current += 8;
+
+        self.accounts = deserialize(&snapshot[current..current + size]).unwrap();
+        current += size;
+
+        self.transaction_count = deserialize(&snapshot[current..current + 8]).unwrap();
+        //info!("deserialized: {:?}", self.accounts);
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut ordered_accounts = BTreeMap::new();
+
+        // only hash internal state of the part being voted upon, i.e. since last
+        //  checkpoint
+        for (pubkey, account) in &self.accounts {
+            ordered_accounts.insert(*pubkey, account.clone());
+        }
+
+        //serialize(&ordered_accounts).unwrap()
+        let size = serialized_size(&self.checkpoints).unwrap() as u64;
+        let mut v = serialize(&size).unwrap();
+        v.extend(serialize(&self.checkpoints).unwrap());
+
+        let size = serialized_size(&self.accounts).unwrap() as u64;
+        v.extend(serialize(&size).unwrap());
+        v.extend(serialize(&self.accounts).unwrap());
+
+        v.extend(serialize(&self.transaction_count).unwrap());
+        v
+    }
+
     pub fn hash_internal_state(&self) -> Hash {
         let mut ordered_accounts = BTreeMap::new();
 
@@ -88,6 +130,7 @@ impl AccountsDB {
     }
 
     fn load(&self, pubkey: &Pubkey) -> Option<&Account> {
+        //info!("accounts(load): {:?}", self.accounts);
         if let Some(account) = self.accounts.get(pubkey) {
             return Some(account);
         }
@@ -269,6 +312,10 @@ impl AccountsDB {
 }
 
 impl Accounts {
+    pub fn deserialize(&self, snapshot: &[u8]) {
+        self.accounts_db.write().unwrap().deserialize(snapshot)
+    }
+
     pub fn keys(&self) -> Vec<Pubkey> {
         self.accounts_db.read().unwrap().keys()
     }
@@ -314,6 +361,10 @@ impl Accounts {
 
     pub fn hash_internal_state(&self) -> Hash {
         self.accounts_db.read().unwrap().hash_internal_state()
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        self.accounts_db.read().unwrap().serialize()
     }
 
     /// This function will prevent multiple threads from modifying the same account state at the

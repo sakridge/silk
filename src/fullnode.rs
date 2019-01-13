@@ -1,5 +1,6 @@
 //! The `fullnode` module hosts all the fullnode microservices.
 
+use crate::snapshot::load_from_snapshot;
 use crate::bank::Bank;
 use crate::broadcast_service::BroadcastService;
 use crate::cluster_info::{ClusterInfo, Node, NodeInfo};
@@ -151,8 +152,15 @@ impl Fullnode {
 
         info!("creating bank...");
         let db_ledger = Self::make_db_ledger(ledger_path);
-        let (bank, entry_height, last_entry_id) =
-            Self::new_bank_from_db_ledger(&db_ledger, leader_scheduler);
+        let (bank, entry_height, last_entry_id) = {
+            if let Ok((bank, entry_height, last_entry_id)) = load_from_snapshot() {
+                (bank, entry_height, last_entry_id)
+            } else {
+                let (bank, entry_height, last_entry_id) =
+                    Self::new_bank_from_db_ledger(&db_ledger, leader_scheduler);
+                (bank, entry_height, last_entry_id)
+            }
+        };
 
         info!("creating networking stack...");
         let local_gossip_addr = node.sockets.gossip.local_addr().unwrap();

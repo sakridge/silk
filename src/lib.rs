@@ -62,6 +62,7 @@ pub mod sigverify;
 pub mod sigverify_stage;
 pub mod status_deque;
 pub mod storage_stage;
+pub mod snapshot;
 pub mod streamer;
 pub mod test_tx;
 pub mod thin_client;

@@ -1,5 +1,6 @@
 //! The `replay_stage` replays transactions broadcast by the leader.
 
+use crate::snapshot::create_snapshot;
 use crate::bank::Bank;
 use crate::cluster_info::ClusterInfo;
 use crate::counter::Counter;
@@ -142,6 +143,8 @@ impl ReplayStage {
                             .send_validator_vote(bank, &cluster_info, sender)
                             .unwrap();
                     }
+
+                    let _ignored = create_snapshot(bank, entry.id, i as u64 + *entry_height);
                 }
                 let (scheduled_leader, _) = bank
                     .get_current_leader()

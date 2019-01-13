@@ -37,6 +37,7 @@ use solana_sdk::token_program;
 use solana_sdk::transaction::Transaction;
 use solana_sdk::vote_program;
 use std;
+use std::collections::HashMap;
 use std::result;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
@@ -472,6 +473,18 @@ impl Bank {
         Ok(())
     }
 
+    fn program_id_to_string(id: &Pubkey) -> String {
+        let mut map = HashMap::new();
+        map.insert(system_program::id(), "system_program");
+        map.insert(solana_native_loader::id(), "solana_native_loader");
+        map.insert(bpf_loader::id(), "bpf_loader");
+        map.insert(budget_program::id(), "budget_program");
+        map.insert(storage_program::id(), "storage_program");
+        map.insert(token_program::id(), "token_program");
+        map.insert(vote_program::id(), "vote_program");
+        map.get(id).unwrap_or(&"unknown program").to_string()
+    }
+
     fn load_accounts(
         &self,
         txs: &[Transaction],
@@ -534,6 +547,11 @@ impl Bank {
             } else {
                 if err_count == 0 {
                     info!("tx error: {:?} {:?}", r, tx);
+                    if log_enabled!(Level::Info) {
+                        for (i, id) in tx.program_ids.iter().enumerate() {
+                            info!("program[{}]: {}", i, Self::program_id_to_string(id));
+                        }
+                    }
                 }
                 err_count += 1;
             }
