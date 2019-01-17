@@ -177,7 +177,7 @@ impl BankingStage {
             .recv_timeout(Duration::from_millis(100))?;
         let mut reqs_len = 0;
         let mms_len = mms.len();
-        info!(
+        debug!(
             "@{:?} process start stalled for: {:?}ms batches: {}",
             timing::timestamp(),
             timing::duration_as_ms(&recv_start.elapsed()),
@@ -218,7 +218,7 @@ impl BankingStage {
         );
         let total_time_s = timing::duration_as_s(&proc_start.elapsed());
         let total_time_ms = timing::duration_as_ms(&proc_start.elapsed());
-        info!(
+        debug!(
             "@{:?} done processing transaction batches: {} time: {:?}ms reqs: {} reqs/s: {}",
             timing::timestamp(),
             mms_len,

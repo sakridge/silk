@@ -91,6 +91,10 @@ fn get_entry_heights_from_last_id(
         | (u64::from(signature_vec[1]) << 16)
         | (u64::from(signature_vec[2]) << 24);
     let max_segment_index = get_segment_from_entry(storage_entry_height);
+    info!(
+        "entry_height: {} index: {}",
+        max_segment_index, storage_entry_height
+    );
     segment_index %= max_segment_index as u64;
     let entry_height = segment_index * ENTRIES_PER_SEGMENT;
     let max_entry_height = entry_height + ENTRIES_PER_SEGMENT;

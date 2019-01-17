@@ -84,7 +84,7 @@ impl Counter {
             self.lograte.store(lograte, Ordering::Relaxed);
         }
         if times % lograte == 0 && times > 0 && log_enabled!(level) {
-            info!(
+            debug!(
                 "COUNTER:{{\"name\": \"{}\", \"counts\": {}, \"samples\": {},  \"now\": {}, \"events\": {}}}",
                 self.name,
                 counts + events,
