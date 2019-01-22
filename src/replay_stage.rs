@@ -1,10 +1,10 @@
 //! The `replay_stage` replays transactions broadcast by the leader.
 
-use crate::snapshot::create_snapshot;
 use crate::bank::Bank;
 use crate::cluster_info::ClusterInfo;
 use crate::counter::Counter;
 use crate::entry::{EntryReceiver, EntrySender};
+use crate::snapshot::create_snapshot;
 use solana_sdk::hash::Hash;
 
 use crate::entry::EntrySlice;

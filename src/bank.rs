@@ -134,6 +134,12 @@ impl Default for Bank {
 }
 
 impl Bank {
+    pub fn new_from_snapshot(snapshot: &[u8]) -> Self {
+        let bank = Self::default();
+        bank.accounts.deserialize(snapshot);
+        bank
+    }
+
     /// Create an Bank with built-in programs.
     pub fn new_with_builtin_programs() -> Self {
         let bank = Self::default();
@@ -943,6 +949,10 @@ impl Bank {
     ///  of the delta of the ledger since the last vote and up to now
     pub fn hash_internal_state(&self) -> Hash {
         self.accounts.hash_internal_state()
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        self.accounts.serialize()
     }
 
     pub fn confirmation_time(&self) -> usize {
@@ -1998,4 +2008,24 @@ mod tests {
         assert_eq!(bank.get_balance(&pubkey), 1);
     }
 
+    #[test]
+    fn test_bank_snapshot() {
+        solana_logger::setup();
+        let mint = Mint::new(1000);
+        let bob = Keypair::new();
+        let bank = Bank::new(&mint);
+        bank.transfer(5, &mint.keypair(), bob.pubkey(), mint.last_id())
+            .unwrap();
+        let bytes = bank.serialize();
+        let reconstructed = Bank::new_from_snapshot(&bytes);
+        assert_eq!(
+            bank.get_balance(&mint.pubkey()),
+            reconstructed.get_balance(&mint.pubkey())
+        );
+        assert_eq!(
+            bank.get_balance(&bob.pubkey()),
+            reconstructed.get_balance(&bob.pubkey())
+        );
+        assert_eq!(bank.transaction_count(), reconstructed.transaction_count());
+    }
 }

@@ -1,6 +1,5 @@
 //! The `fullnode` module hosts all the fullnode microservices.
 
-use crate::snapshot::load_from_snapshot;
 use crate::bank::Bank;
 use crate::broadcast_service::BroadcastService;
 use crate::cluster_info::{ClusterInfo, Node, NodeInfo};
@@ -11,6 +10,7 @@ use crate::leader_scheduler::LeaderScheduler;
 use crate::rpc::JsonRpcService;
 use crate::rpc_pubsub::PubSubService;
 use crate::service::Service;
+use crate::snapshot::load_from_snapshot;
 use crate::storage_stage::STORAGE_ROTATE_TEST_COUNT;
 use crate::tpu::{Tpu, TpuReturnType};
 use crate::tpu_forwarder::TpuForwarder;
