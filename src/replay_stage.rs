@@ -70,6 +70,7 @@ impl ReplayStage {
         ledger_entry_sender: &EntrySender,
         entry_height: &mut u64,
         last_entry_id: &mut Hash,
+        ledger_path: Option<&str>,
     ) -> Result<()> {
         let timer = Duration::new(1, 0);
         //coalesce all the available entries into a single vote
@@ -144,7 +145,10 @@ impl ReplayStage {
                             .unwrap();
                     }
 
-                    let _ignored = create_snapshot(bank, entry.id, i as u64 + *entry_height);
+                    if let Some(ledger_path) = ledger_path {
+                        let snapshot_path = format!("{}/{}", ledger_path, "bank.snapshot");
+                        let _ignored = create_snapshot(&snapshot_path, bank, entry.id, i as u64 + *entry_height);
+                    }
                 }
                 let (scheduled_leader, _) = bank
                     .get_current_leader()
@@ -204,12 +208,14 @@ impl ReplayStage {
         exit: Arc<AtomicBool>,
         entry_height: u64,
         last_entry_id: Hash,
+        ledger_path: &str,
     ) -> (Self, EntryReceiver) {
         let (vote_blob_sender, vote_blob_receiver) = channel();
         let (ledger_entry_sender, ledger_entry_receiver) = channel();
         let send = UdpSocket::bind("0.0.0.0:0").expect("bind");
         let t_responder = responder("replay_stage", Arc::new(send), vote_blob_receiver);
 
+        let ledger_path0 = ledger_path.to_string();
         let keypair = Arc::new(keypair);
         let t_replay = Builder::new()
             .name("solana-replay-stage".to_string())
@@ -248,6 +254,7 @@ impl ReplayStage {
                         &ledger_entry_sender,
                         &mut entry_height_,
                         &mut last_entry_id,
+                        Some(&ledger_path0),
                     ) {
                         Err(Error::RecvTimeoutError(RecvTimeoutError::Disconnected)) => break,
                         Err(Error::RecvTimeoutError(RecvTimeoutError::Timeout)) => (),
@@ -389,6 +396,7 @@ mod test {
             exit.clone(),
             initial_entry_len,
             last_entry_id,
+            &my_ledger_path,
         );
 
         // Send enough ticks to trigger leader rotation
@@ -485,6 +493,7 @@ mod test {
             exit.clone(),
             initial_entry_len as u64,
             last_entry_id,
+            &my_ledger_path,
         );
 
         // Vote sender should error because no leader contact info is found in the
@@ -601,6 +610,7 @@ mod test {
             exit.clone(),
             initial_entry_len as u64,
             last_entry_id,
+            &my_ledger_path,
         );
 
         // Vote sender should error because no leader contact info is found in the
@@ -690,6 +700,7 @@ mod test {
             &ledger_entry_sender,
             &mut entry_height,
             &mut last_entry_id,
+            None,
         );
 
         match res {
@@ -716,6 +727,7 @@ mod test {
             &ledger_entry_sender,
             &mut entry_height,
             &mut last_entry_id,
+            None,
         );
 
         match res {

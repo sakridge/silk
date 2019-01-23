@@ -1,9 +1,11 @@
 use crate::checkpoint::Checkpoint;
 use crate::poh_service::NUM_TICKS_PER_SECOND;
-use hashbrown::HashMap;
+use std::collections::HashMap;
+use crate::bank;
 use solana_sdk::hash::Hash;
 use solana_sdk::signature::Signature;
 use solana_sdk::timing::timestamp;
+use bincode::{serialize, deserialize};
 use std::collections::VecDeque;
 use std::result;
 
@@ -15,7 +17,7 @@ use std::result;
 /// not be processed by the network.
 pub const MAX_ENTRY_IDS: usize = NUM_TICKS_PER_SECOND * 120;
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Serialize, Debug, PartialEq, Eq, Clone)]
 pub enum Status<T> {
     Reserved,
     Complete(T),
@@ -24,7 +26,7 @@ pub enum Status<T> {
 type StatusMap<T> = HashMap<Signature, Status<T>>;
 type StatusEntryMap<T> = HashMap<Hash, StatusEntry<T>>;
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Serialize, Debug, PartialEq, Eq, Clone)]
 pub enum StatusDequeError {
     /// The `Signature` has been seen before. This can occur under normal operation
     /// when a UDP packet is duplicated, as a user error from a client not updating
@@ -39,7 +41,7 @@ pub enum StatusDequeError {
 pub type Result<T> = result::Result<T, StatusDequeError>;
 
 /// a record of a tick, from register_tick
-#[derive(Clone)]
+#[derive(Serialize, Clone)]
 struct StatusEntry<T> {
     /// when the id was registered, according to network time
     tick_height: u64,
@@ -104,6 +106,15 @@ impl<T: Clone> Checkpoint for StatusDeque<T> {
 }
 
 impl<T: Clone> StatusDeque<T> {
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut v = serialize(&self.entries).unwrap();
+        //let err: bank::Result<()> = Err(bank::BankError::AccountInUse);
+        //let mut v = vec![];
+        //v.extend(serialize(&self.last_id).unwrap());
+        //v.extend(serialize(&err).unwrap());
+        v
+    }
+
     pub fn update_signature_status_with_last_id(
         &mut self,
         signature: &Signature,

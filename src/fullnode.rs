@@ -107,6 +107,7 @@ pub struct Fullnode {
     broadcast_socket: UdpSocket,
     db_ledger: Arc<DbLedger>,
     vote_signer: Arc<VoteSignerProxy>,
+    ledger_path: String,
 }
 
 impl Fullnode {
@@ -153,11 +154,15 @@ impl Fullnode {
         info!("creating bank...");
         let db_ledger = Self::make_db_ledger(ledger_path);
         let (bank, entry_height, last_entry_id) = {
-            if let Ok((bank, entry_height, last_entry_id)) = load_from_snapshot() {
-                (bank, entry_height, last_entry_id)
-            } else {
+            if let Ok((bank, entry_height, last_entry_id)) = load_from_snapshot(&format!("{}/{}", ledger_path, "bank.snapshot")) {
+                info!("entry_height: {} id: {} count: {}", entry_height, last_entry_id, bank.transaction_count());
+                //(bank, entry_height, last_entry_id)
+            }
+            //} else {
+            {
                 let (bank, entry_height, last_entry_id) =
                     Self::new_bank_from_db_ledger(&db_ledger, leader_scheduler);
+                info!("db_ledger: entry_height: {} id: {} count: {}", entry_height, last_entry_id, bank.transaction_count());
                 (bank, entry_height, last_entry_id)
             }
         };
@@ -313,6 +318,7 @@ impl Fullnode {
                 sockets,
                 db_ledger.clone(),
                 storage_rotate_count,
+                ledger_path,
             );
             let tpu_forwarder = TpuForwarder::new(
                 node.sockets
@@ -383,6 +389,7 @@ impl Fullnode {
             broadcast_socket: node.sockets.broadcast,
             db_ledger,
             vote_signer,
+            ledger_path: ledger_path.to_string(),
         }
     }
 
@@ -462,6 +469,7 @@ impl Fullnode {
                 sockets,
                 self.db_ledger.clone(),
                 STORAGE_ROTATE_TEST_COUNT,
+                &self.ledger_path,
             );
             let tpu_forwarder = TpuForwarder::new(
                 self.tpu_sockets

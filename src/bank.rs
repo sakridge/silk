@@ -14,7 +14,7 @@ use crate::poh_recorder::PohRecorder;
 use crate::runtime::{self, RuntimeError};
 use crate::status_deque::{Status, StatusDeque, MAX_ENTRY_IDS};
 use crate::storage_stage::StorageState;
-use bincode::deserialize;
+use bincode::{deserialize};
 use itertools::Itertools;
 use log::Level;
 use rayon::prelude::*;
@@ -44,7 +44,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
 /// Reasons a transaction might be rejected.
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Serialize, Debug, PartialEq, Eq, Clone)]
 pub enum BankError {
     /// This Pubkey is being processed in another transaction
     AccountInUse,
@@ -952,7 +952,9 @@ impl Bank {
     }
 
     pub fn serialize(&self) -> Vec<u8> {
-        self.accounts.serialize()
+        let mut v = self.accounts.serialize();
+        v.extend(self.last_ids.read().unwrap().serialize());
+        v
     }
 
     pub fn confirmation_time(&self) -> usize {
@@ -2026,6 +2028,7 @@ mod tests {
             bank.get_balance(&bob.pubkey()),
             reconstructed.get_balance(&bob.pubkey())
         );
+        assert_eq!(bank.last_id(), reconstructed.last_id());
         assert_eq!(bank.transaction_count(), reconstructed.transaction_count());
     }
 }
