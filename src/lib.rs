@@ -29,6 +29,7 @@ pub mod crds_gossip_push;
 pub mod crds_value;
 #[macro_use]
 pub mod contact_info;
+pub mod appendvec;
 pub mod cluster_info;
 pub mod compute_leader_confirmation_service;
 pub mod db_ledger;
