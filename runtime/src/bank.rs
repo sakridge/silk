@@ -561,7 +561,10 @@ impl Bank {
     }
 
     pub fn transaction_count(&self) -> u64 {
-        self.accounts.transaction_count()
+        let mut count = self.accounts.transaction_count();
+        let parents = self.parents();
+        count += parents.iter().map(|p| p.accounts.transaction_count()).sum::<u64>();
+        count
     }
 
     pub fn get_signature_status(&self, signature: &Signature) -> Option<Result<()>> {
@@ -1139,6 +1142,8 @@ mod tests {
         let tx = SystemTransaction::new_move(&key1, key2.pubkey(), 1, genesis_block.last_id(), 0);
         assert_eq!(bank.process_transaction(&tx), Ok(()));
         assert_eq!(parent.get_signature_status(&tx.signatures[0]), None);
+        assert_eq!(parent.transaction_count(), 1);
+        assert_eq!(bank.transaction_count(), 2);
     }
 
     #[test]
