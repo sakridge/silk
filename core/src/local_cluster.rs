@@ -3,6 +3,7 @@ use crate::cluster_info::{Node, FULLNODE_PORT_RANGE};
 use crate::contact_info::ContactInfo;
 use crate::fullnode::{Fullnode, FullnodeConfig};
 use crate::gossip_service::discover;
+use crate::replicator::Replicator;
 use crate::service::Service;
 use solana_client::client::create_client;
 use solana_client::thin_client::{retry_get_balance, ThinClient};
@@ -23,18 +24,22 @@ pub struct LocalCluster {
     pub entry_point_info: ContactInfo,
     pub ledger_paths: Vec<String>,
     fullnodes: Vec<Fullnode>,
+    replicators: Vec<Replicator>,
+    genesis_ledger_path: String,
+    genesis_block: GenesisBlock,
 }
 
 impl LocalCluster {
     pub fn new(num_nodes: usize, cluster_lamports: u64, lamports_per_node: u64) -> Self {
         let stakes: Vec<_> = (0..num_nodes).map(|_| lamports_per_node).collect();
-        Self::new_with_config(&stakes, cluster_lamports, &FullnodeConfig::default())
+        Self::new_with_config(&stakes, cluster_lamports, &FullnodeConfig::default(), 0)
     }
 
     pub fn new_with_config(
         node_stakes: &[u64],
         cluster_lamports: u64,
         fullnode_config: &FullnodeConfig,
+        num_replicators: u64,
     ) -> Self {
         let leader_keypair = Arc::new(Keypair::new());
         let leader_pubkey = leader_keypair.pubkey();
@@ -48,6 +53,7 @@ impl LocalCluster {
         ledger_paths.push(leader_ledger_path.clone());
         let voting_keypair = Keypair::new();
         let leader_contact_info = leader_node.info.clone();
+
         let leader_server = Fullnode::new(
             leader_node,
             &leader_keypair,
@@ -57,54 +63,30 @@ impl LocalCluster {
             None,
             fullnode_config,
         );
-        let mut fullnodes = vec![leader_server];
-        let mut client = create_client(
-            leader_contact_info.client_facing_addr(),
-            FULLNODE_PORT_RANGE,
-        );
-        for stake in &node_stakes[1..] {
-            // Must have enough tokens to fund vote account and set delegate
-            assert!(*stake > 2);
-            let validator_keypair = Arc::new(Keypair::new());
-            let voting_keypair = Keypair::new();
-            let validator_pubkey = validator_keypair.pubkey();
-            let validator_node = Node::new_localhost_with_pubkey(&validator_keypair.pubkey());
-            let ledger_path = tmp_copy_blocktree!(&genesis_ledger_path);
-            ledger_paths.push(ledger_path.clone());
 
-            // Send each validator some lamports to vote
-            let validator_balance =
-                Self::transfer(&mut client, &mint_keypair, &validator_pubkey, *stake);
-            info!(
-                "validator {} balance {}",
-                validator_pubkey, validator_balance
-            );
+        let fullnodes = vec![leader_server];
 
-            Self::create_and_fund_vote_account(
-                &mut client,
-                &voting_keypair,
-                &validator_keypair,
-                stake - 1,
-            )
-            .unwrap();
-            let validator_server = Fullnode::new(
-                validator_node,
-                &validator_keypair,
-                &ledger_path,
-                &voting_keypair.pubkey(),
-                voting_keypair,
-                Some(&leader_contact_info),
-                fullnode_config,
-            );
-            fullnodes.push(validator_server);
-        }
-        discover(&leader_contact_info.gossip, node_stakes.len()).unwrap();
-        Self {
+        let mut cluster = Self {
             funding_keypair: mint_keypair,
             entry_point_info: leader_contact_info,
             fullnodes,
+            replicators: vec![],
             ledger_paths,
+            genesis_ledger_path,
+            genesis_block,
+        };
+
+        for stake in &node_stakes[1..] {
+            cluster.add_validator(&fullnode_config, *stake);
         }
+
+        for _ in 0..num_replicators {
+            cluster.add_replicator();
+        }
+
+        discover(&cluster.entry_point_info.gossip, node_stakes.len()).unwrap();
+
+        cluster
     }
 
     pub fn exit(&self) {
@@ -118,6 +100,83 @@ impl LocalCluster {
         while let Some(node) = self.fullnodes.pop() {
             node.join().unwrap();
         }
+
+        while let Some(node) = self.replicators.pop() {
+            node.close();
+        }
+    }
+
+    fn add_validator(&mut self, fullnode_config: &FullnodeConfig, stake: u64) -> Fullnode {
+        let mut client = create_client(
+            self.entry_point_info.client_facing_addr(),
+            FULLNODE_PORT_RANGE,
+        );
+
+        // Must have enough tokens to fund vote account and set delegate
+        assert!(stake > 2);
+        let validator_keypair = Arc::new(Keypair::new());
+        let voting_keypair = Keypair::new();
+        let validator_pubkey = validator_keypair.pubkey();
+        let validator_node = Node::new_localhost_with_pubkey(&validator_keypair.pubkey());
+        let ledger_path = tmp_copy_blocktree!(&self.genesis_ledger_path);
+        self.ledger_paths.push(ledger_path.clone());
+
+        // Send each validator some lamports to vote
+        let validator_balance =
+            Self::transfer(&mut client, &self.funding_keypair, &validator_pubkey, stake);
+        info!(
+            "validator {} balance {}",
+            validator_pubkey, validator_balance
+        );
+
+        Self::create_and_fund_vote_account(
+            &mut client,
+            &voting_keypair,
+            &validator_keypair,
+            stake - 1,
+        )
+        .unwrap();
+        let validator_server = Fullnode::new(
+            validator_node,
+            &validator_keypair,
+            &ledger_path,
+            &voting_keypair.pubkey(),
+            voting_keypair,
+            Some(&self.entry_point_info),
+            fullnode_config,
+        );
+
+        validator_server
+    }
+
+    fn add_replicator(&mut self) -> Replicator {
+        let replicator_keypair = Arc::new(Keypair::new());
+        let mut client = create_client(
+            self.entry_point_info.client_facing_addr(),
+            FULLNODE_PORT_RANGE,
+        );
+
+        Self::transfer(
+            &mut client,
+            &self.funding_keypair,
+            &replicator_keypair.pubkey(),
+            1,
+        );
+        let replicator_node = Node::new_localhost_with_pubkey(&replicator_keypair.pubkey());
+
+        let (replicator_ledger_path, _blockhash) = create_new_tmp_ledger!(&self.genesis_block);
+        let replicator = Replicator::new(
+            &replicator_ledger_path,
+            replicator_node,
+            self.entry_point_info.clone(),
+            replicator_keypair,
+            None,
+        )
+        .unwrap();
+
+        self.ledger_paths.push(replicator_ledger_path);
+
+        replicator
     }
 
     fn close(&mut self) {
@@ -224,6 +283,6 @@ mod test {
         solana_logger::setup();
         let mut fullnode_exit = FullnodeConfig::default();
         fullnode_exit.rpc_config.enable_fullnode_exit = true;
-        let _cluster = LocalCluster::new_with_config(&[3], 100, &fullnode_exit);
+        let _cluster = LocalCluster::new_with_config(&[3], 100, &fullnode_exit, 0);
     }
 }

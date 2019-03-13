@@ -60,7 +60,7 @@ fn test_fullnode_exit_2() {
     let num_nodes = 2;
     let mut fullnode_config = FullnodeConfig::default();
     fullnode_config.rpc_config.enable_fullnode_exit = true;
-    let local = LocalCluster::new_with_config(&[100; 2], 10_000, &fullnode_config);
+    let local = LocalCluster::new_with_config(&[100; 2], 10_000, &fullnode_config, 0);
     cluster_tests::fullnode_exit(&local.entry_point_info, num_nodes);
 }
 
@@ -70,7 +70,7 @@ fn test_leader_failure_2() {
     let num_nodes = 2;
     let mut fullnode_config = FullnodeConfig::default();
     fullnode_config.rpc_config.enable_fullnode_exit = true;
-    let local = LocalCluster::new_with_config(&[100; 2], 10_000, &fullnode_config);
+    let local = LocalCluster::new_with_config(&[100; 2], 10_000, &fullnode_config, 0);
     cluster_tests::kill_entry_and_spend_and_verify_rest(
         &local.entry_point_info,
         &local.funding_keypair,
@@ -84,7 +84,7 @@ fn test_leader_failure_3() {
     let num_nodes = 3;
     let mut fullnode_config = FullnodeConfig::default();
     fullnode_config.rpc_config.enable_fullnode_exit = true;
-    let local = LocalCluster::new_with_config(&[100; 3], 10_000, &fullnode_config);
+    let local = LocalCluster::new_with_config(&[100; 3], 10_000, &fullnode_config, 0);
     cluster_tests::kill_entry_and_spend_and_verify_rest(
         &local.entry_point_info,
         &local.funding_keypair,
@@ -99,7 +99,7 @@ fn test_two_unbalanced_stakes() {
     fullnode_config.tick_config =
         PohServiceConfig::Sleep(Duration::from_millis(100 / num_ticks_per_second));
     fullnode_config.rpc_config.enable_fullnode_exit = true;
-    let mut cluster = LocalCluster::new_with_config(&[999_990, 3], 1_000_000, &fullnode_config);
+    let mut cluster = LocalCluster::new_with_config(&[999_990, 3], 1_000_000, &fullnode_config, 0);
     let num_epochs_to_sleep = 10;
     let num_ticks_to_sleep = num_epochs_to_sleep * DEFAULT_TICKS_PER_SLOT * DEFAULT_SLOTS_PER_EPOCH;
     sleep(Duration::from_millis(
@@ -116,7 +116,7 @@ fn test_forwarding() {
     // Set up a cluster where one node is never the leader, so all txs sent to this node
     // will be have to be forwarded in order to be confirmed
     let fullnode_config = FullnodeConfig::default();
-    let cluster = LocalCluster::new_with_config(&[999_990, 3], 2_000_000, &fullnode_config);
+    let cluster = LocalCluster::new_with_config(&[999_990, 3], 2_000_000, &fullnode_config, 0);
 
     let cluster_nodes = discover(&cluster.entry_point_info.gossip, 2).unwrap();
     assert!(cluster_nodes.len() >= 2);

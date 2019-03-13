@@ -10,6 +10,7 @@ use solana::blocktree::{
 use solana::cluster_info::{Node, FULLNODE_PORT_RANGE};
 use solana::contact_info::ContactInfo;
 use solana::fullnode::{Fullnode, FullnodeConfig};
+use solana::local_cluster::LocalCluster;
 use solana::replicator::Replicator;
 use solana::storage_stage::STORAGE_ROTATE_TEST_COUNT;
 use solana_client::client::create_client;
@@ -24,124 +25,11 @@ use std::time::Duration;
 fn test_replicator_startup_basic() {
     solana_logger::setup();
     info!("starting replicator test");
-    let replicator_ledger_path = &get_tmp_ledger_path!();
 
-    info!("starting leader node");
-    let leader_keypair = Arc::new(Keypair::new());
-    let leader_node = Node::new_localhost_with_pubkey(&leader_keypair.pubkey());
-    let leader_info = leader_node.info.clone();
-
-    let (genesis_block, mint_keypair) =
-        GenesisBlock::new_with_leader(1_000_000_000, &leader_info.id, 42);
-    let (leader_ledger_path, _blockhash) = create_new_tmp_ledger!(&genesis_block);
-
-    let validator_ledger_path = tmp_copy_blocktree!(&leader_ledger_path);
-
-    {
-        let voting_keypair = Keypair::new();
-
-        let mut fullnode_config = FullnodeConfig::default();
-        fullnode_config.storage_rotate_count = STORAGE_ROTATE_TEST_COUNT;
-        let leader = Fullnode::new(
-            leader_node,
-            &leader_keypair,
-            &leader_ledger_path,
-            &voting_keypair.pubkey(),
-            voting_keypair,
-            None,
-            &fullnode_config,
-        );
-
-        debug!("Looking for leader on gossip...");
-        solana::gossip_service::discover(&leader_info.gossip, 1).unwrap();
-
-        let validator_keypair = Arc::new(Keypair::new());
-        let voting_keypair = Keypair::new();
-
-        let mut leader_client =
-            create_client(leader_info.client_facing_addr(), FULLNODE_PORT_RANGE);
-        let blockhash = leader_client.get_recent_blockhash();
-        debug!("blockhash: {:?}", blockhash);
-
-        leader_client
-            .transfer(10, &mint_keypair, &validator_keypair.pubkey(), &blockhash)
-            .unwrap();
-
-        let validator_node = Node::new_localhost_with_pubkey(&validator_keypair.pubkey());
-
-        let validator = Fullnode::new(
-            validator_node,
-            &validator_keypair,
-            &validator_ledger_path,
-            &voting_keypair.pubkey(),
-            voting_keypair,
-            Some(&leader_info),
-            &fullnode_config,
-        );
-
-        let bob = Keypair::new();
-
-        info!("starting transfers..");
-        for i in 0..64 {
-            debug!("transfer {}", i);
-            let blockhash = leader_client.get_recent_blockhash();
-            let mut transaction =
-                SystemTransaction::new_account(&mint_keypair, &bob.pubkey(), 1, blockhash, 0);
-            leader_client
-                .retry_transfer(&mint_keypair, &mut transaction, 5)
-                .unwrap();
-            debug!(
-                "transfer {}: mint balance={:?}, bob balance={:?}",
-                i,
-                leader_client.get_balance(&mint_keypair.pubkey()),
-                leader_client.get_balance(&bob.pubkey()),
-            );
-        }
-
-        let replicator_keypair = Arc::new(Keypair::new());
-
-        info!("giving replicator lamports..");
-
-        let blockhash = leader_client.get_recent_blockhash();
-        // Give the replicator some lamports
-        let mut tx = SystemTransaction::new_account(
-            &mint_keypair,
-            &replicator_keypair.pubkey(),
-            1,
-            blockhash,
-            0,
-        );
-        leader_client
-            .retry_transfer(&mint_keypair, &mut tx, 5)
-            .unwrap();
-
-        info!("starting replicator node");
-        let replicator_node = Node::new_localhost_with_pubkey(&replicator_keypair.pubkey());
-        let _replicator_info = replicator_node.info.clone();
-
-        let leader_info = ContactInfo::new_gossip_entry_point(&leader_info.gossip);
-
-        let replicator = Replicator::new(
-            replicator_ledger_path,
-            replicator_node,
-            leader_info,
-            replicator_keypair,
-            None,
-        )
-        .unwrap();
-
-        info!("started replicator..");
-
-        replicator.close();
-        validator.close().unwrap();
-        leader.close().unwrap();
-    }
-
-    info!("cleanup");
-    Blocktree::destroy(&leader_ledger_path).expect("Expected successful database destruction");
-    Blocktree::destroy(&replicator_ledger_path).expect("Expected successful database destruction");
-    let _ignored = remove_dir_all(&leader_ledger_path);
-    let _ignored = remove_dir_all(&replicator_ledger_path);
+    let num_nodes = 2;
+    let mut fullnode_config = FullnodeConfig::default();
+    fullnode_config.storage_rotate_count = STORAGE_ROTATE_TEST_COUNT;
+    let cluster = LocalCluster::new_with_config(&[100; 2], 10_000, &fullnode_config, 1);
 }
 
 #[test]
