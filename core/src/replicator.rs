@@ -488,7 +488,7 @@ impl Replicator {
     fn poll_for_blockhash_and_entry_height(
         cluster_info: &Arc<RwLock<ClusterInfo>>,
     ) -> Result<(String, u64)> {
-        for _ in 0..10 {
+        for _ in 0..100 {
             let rpc_client = {
                 let cluster_info = cluster_info.read().unwrap();
                 let rpc_peers = cluster_info.rpc_peers();
@@ -507,7 +507,7 @@ impl Replicator {
                 .unwrap();
             info!("max entry_height: {}", storage_entry_height);
             if get_segment_from_entry(storage_entry_height) != 0 {
-                return Ok((storage_blockhash, storage_entry_height));
+                //return Ok((storage_blockhash, storage_entry_height));
             }
             sleep(Duration::from_secs(3));
         }

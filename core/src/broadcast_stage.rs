@@ -143,7 +143,7 @@ impl Broadcast {
             "broadcast_service-time_ms",
             duration_as_ms(&now.elapsed()) as usize
         );
-        info!(
+        debug!(
             "broadcast: {} entries, blob time {} broadcast time {}",
             num_entries, to_blobs_elapsed, broadcast_elapsed
         );

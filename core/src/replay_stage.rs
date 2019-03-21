@@ -150,6 +150,8 @@ impl ReplayStage {
                         Self::reset_poh_recorder(&my_id, &bank, &poh_recorder, ticks_per_slot);
 
                         is_tpu_bank_active = false;
+                    } else {
+                        info!("nothing votable");
                     }
 
                     let (reached_leader_tick, grace_ticks) = if !is_tpu_bank_active {

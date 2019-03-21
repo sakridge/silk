@@ -120,7 +120,9 @@ impl LocalCluster {
         let (genesis_ledger_path, _blockhash) = create_new_tmp_ledger!(&genesis_block);
         let leader_ledger_path = tmp_copy_blocktree!(&genesis_ledger_path);
         let voting_keypair = Keypair::new();
+        let leader_vote_pubkey = voting_keypair.pubkey().clone();
         let leader_contact_info = leader_node.info.clone();
+        info!("leader: {} voting_pubkey: {}", leader_pubkey, voting_keypair.pubkey());
 
         let leader_server = Fullnode::new(
             leader_node,
@@ -152,6 +154,7 @@ impl LocalCluster {
             fullnode_config: fullnode_config.clone(),
         };
 
+        info!("adding validators");
         for stake in &node_stakes[1..] {
             cluster.add_validator(&fullnode_config, *stake);
         }
@@ -206,8 +209,8 @@ impl LocalCluster {
         let validator_balance =
             Self::transfer_with_client(&client, &self.funding_keypair, &validator_pubkey, stake);
         info!(
-            "validator {} balance {}",
-            validator_pubkey, validator_balance
+            "validator {} balance {} voting_key: {}",
+            validator_pubkey, validator_balance, voting_keypair.pubkey()
         );
 
         Self::create_and_fund_vote_account(&client, &voting_keypair, &validator_keypair, stake - 1)
@@ -425,6 +428,8 @@ mod test {
 
     #[test]
     fn test_local_cluster_start_and_exit_with_config() {
+        use std::thread::sleep;
+        use std::time::Duration;
         solana_logger::setup();
         let mut fullnode_exit = FullnodeConfig::default();
         fullnode_exit.rpc_config.enable_fullnode_exit = true;
@@ -438,6 +443,21 @@ mod test {
             16,
             16,
         );
+        sleep(Duration::from_secs(30));
+
+        let client = create_client(
+            cluster.entry_point_info.client_facing_addr(),
+            FULLNODE_PORT_RANGE,
+        );
+
+        let data = client.get_account_data(&cluster.leader_pubkey);
+        let balance = client.get_balance(&cluster.leader_pubkey);
+        info!("data: {:?} balance: {:?}", data, balance);
+
+        let data = client.get_account_data(&cluster.leader_vote_pubkey);
+        let balance = client.get_balance(&cluster.leader_vote_pubkey);
+        info!("vote: data: {:?} balance: {:?}", data, balance);
+
         assert_eq!(cluster.fullnodes.len(), NUM_NODES);
         assert_eq!(cluster.replicators.len(), num_replicators);
     }
