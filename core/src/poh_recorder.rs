@@ -150,7 +150,7 @@ impl PohRecorder {
     ) {
         self.clear_bank();
         let mut cache = vec![];
-        info!(
+        debug!(
             "reset poh from: {},{} to: {},{}",
             self.poh.hash, self.poh.tick_height, blockhash, tick_height,
         );

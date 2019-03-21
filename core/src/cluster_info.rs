@@ -273,7 +273,7 @@ impl ClusterInfo {
 
     /// Record the id of the current leader for use by `leader_tpu_via_blobs()`
     pub fn set_leader(&mut self, leader_id: &Pubkey) {
-        warn!(
+        debug!(
             "{}: LEADER_UPDATE TO {} from {}",
             self.gossip.id, leader_id, self.gossip_leader_id,
         );

@@ -151,7 +151,7 @@ impl ReplayStage {
 
                         is_tpu_bank_active = false;
                     } else {
-                        info!("nothing votable");
+                        debug!("nothing votable");
                     }
 
                     let (reached_leader_tick, grace_ticks) = if !is_tpu_bank_active {
