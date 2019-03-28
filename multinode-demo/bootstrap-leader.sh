@@ -72,6 +72,7 @@ bootstrap_leader_staker_id_path="$SOLANA_CONFIG_DIR"/bootstrap-leader-staker-id.
 bootstrap_leader_staker_id=$($solana_wallet --keypair "$bootstrap_leader_staker_id_path" address)
 
 trap 'kill "$pid" && wait "$pid"' INT TERM ERR
+cd ${here}/../fullnode
 $program \
   --identity "$bootstrap_leader_id_path" \
   --voting-keypair "$bootstrap_leader_staker_id_path" \
