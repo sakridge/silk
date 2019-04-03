@@ -94,6 +94,7 @@ pub fn do_bench_tps(config: Config) {
         .poll_get_balance(&gen_keypairs.last().unwrap().pubkey())
         .unwrap_or(0);
 
+    let now = Instant::now();
     if num_lamports_per_account > keypair0_balance {
         let extra = num_lamports_per_account - keypair0_balance;
         let total = extra * (gen_keypairs.len() as u64);
@@ -104,6 +105,8 @@ pub fn do_bench_tps(config: Config) {
     let start = gen_keypairs.len() - (tx_count * 2) as usize;
     let keypairs = &gen_keypairs[start..];
     airdrop_lamports(&barrier_client, &drone_addr, &barrier_source_keypair, 1);
+
+    println!("funding took: {} ms", duration_as_ms(&now.elapsed()));
 
     println!("Get last ID...");
     let mut blockhash = client.get_recent_blockhash().unwrap();
@@ -746,13 +749,15 @@ mod tests {
     #[test]
     #[ignore]
     fn test_bench_tps() {
-        let fullnode_config = FullnodeConfig::default();
+        solana_logger::setup();
+        let mut fullnode_config = FullnodeConfig::default();
+        fullnode_config.sigverify_disabled = true;
         const NUM_NODES: usize = 1;
         let cluster =
-            LocalCluster::new_with_config(&[999_990; NUM_NODES], 2_000_000, &fullnode_config);
+            LocalCluster::new_with_config(&[999_990; NUM_NODES], 200_000_000, &fullnode_config);
 
         let drone_keypair = Keypair::new();
-        cluster.transfer(&cluster.funding_keypair, &drone_keypair.pubkey(), 1_000_000);
+        cluster.transfer(&cluster.funding_keypair, &drone_keypair.pubkey(), 100_000_000);
 
         let (addr_sender, addr_receiver) = channel();
         run_local_drone(drone_keypair, addr_sender);
@@ -761,8 +766,8 @@ mod tests {
         let mut cfg = Config::default();
         cfg.network_addr = cluster.entry_point_info.gossip;
         cfg.drone_addr = drone_addr;
-        cfg.tx_count = 100;
-        cfg.duration = Duration::from_secs(5);
+        cfg.tx_count = 100_000;
+        cfg.duration = Duration::from_secs(90);
         cfg.num_nodes = NUM_NODES;
 
         do_bench_tps(cfg);
