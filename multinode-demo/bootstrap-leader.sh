@@ -3,6 +3,8 @@
 # Start the bootstrap leader node
 #
 
+set -o xtrace
+
 here=$(dirname "$0")
 # shellcheck source=multinode-demo/common.sh
 source "$here"/common.sh
@@ -70,8 +72,9 @@ bootstrap_leader_id_path="$SOLANA_CONFIG_DIR"/bootstrap-leader-id.json
 bootstrap_leader_vote_id_path="$SOLANA_CONFIG_DIR"/bootstrap-leader-vote-id.json
 bootstrap_leader_vote_id=$($solana_keygen pubkey "$bootstrap_leader_vote_id_path")
 
-trap 'kill "$pid" && wait "$pid"' INT TERM ERR
-$program \
+#trap 'kill "$pid" && wait "$pid"' INT TERM ERR
+#$program \
+sudo LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH perf record -g $program \
   --identity "$bootstrap_leader_id_path" \
   --voting-keypair "$bootstrap_leader_vote_id_path" \
   --vote-account  "$bootstrap_leader_vote_id" \
@@ -81,8 +84,9 @@ $program \
   --rpc-port 8899 \
   --rpc-drone-address 127.0.0.1:9900 \
   "${extra_fullnode_args[@]}" \
-  > >($bootstrap_leader_logger) 2>&1 &
-pid=$!
-oom_score_adj "$pid" 1000
 
-wait "$pid"
+#  > >($bootstrap_leader_logger) 2>&1
+#pid=$!
+#oom_score_adj "$pid" 1000
+#
+#wait "$pid"
