@@ -93,6 +93,7 @@ impl BankForks {
         let prev = self.banks.insert(bank.slot(), bank.clone());
         assert!(prev.is_none());
 
+        info!("inserting blockhash: {}", bank.confirmed_last_blockhash());
         self.working_bank = bank.clone();
     }
 
@@ -107,6 +108,7 @@ impl BankForks {
             .banks
             .get(&root)
             .expect("root bank didn't exist in bank_forks");
+        info!("set_root: {} hash: {}", root, root_bank.confirmed_last_blockhash());
         root_bank.squash();
         self.prune_non_root(root);
         inc_new_counter_info!(

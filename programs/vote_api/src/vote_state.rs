@@ -1,5 +1,6 @@
 //! Vote state, vote program
 //! Receive and processes votes from validators
+use rand::{thread_rng, Rng};
 use crate::id;
 use bincode::{deserialize, serialize_into, serialized_size, ErrorKind};
 use serde_derive::{Deserialize, Serialize};
@@ -8,6 +9,7 @@ use solana_sdk::instruction::InstructionError;
 use solana_sdk::instruction_processor_utils::State;
 use solana_sdk::pubkey::Pubkey;
 use std::collections::VecDeque;
+use log::*;
 
 // Maximum number of votes to keep around
 pub const MAX_LOCKOUT_HISTORY: usize = 31;
@@ -51,11 +53,13 @@ impl Lockout {
         self.slot + self.lockout()
     }
     pub fn is_expired(&self, slot: u64) -> bool {
-        self.expiration_slot() < slot
+        let exp = self.expiration_slot();
+        info!("expiration slot: {} self.slot: {} slot: {}", exp, self.slot, slot);
+        exp < slot
     }
 }
 
-#[derive(Debug, Default, Serialize, Deserialize, PartialEq, Eq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct VoteState {
     pub votes: VecDeque<Lockout>,
     pub node_id: Pubkey,
@@ -65,6 +69,21 @@ pub struct VoteState {
     pub commission: u32,
     pub root_slot: Option<u64>,
     credits: u64,
+    id: u64,
+}
+
+impl Default for VoteState {
+    fn default() -> Self {
+        VoteState {
+            votes: VecDeque::new(),
+            node_id: Pubkey::default(),
+            authorized_voter_id: Pubkey::default(),
+            commission: 0,
+            root_slot: None,
+            credits: 0,
+            id: thread_rng().gen_range(0, 500)
+        }
+    }
 }
 
 impl VoteState {
@@ -72,6 +91,7 @@ impl VoteState {
         let votes = VecDeque::new();
         let credits = 0;
         let root_slot = None;
+        let id = thread_rng().gen_range(0, 500);
         Self {
             votes,
             node_id: *node_id,
@@ -79,6 +99,7 @@ impl VoteState {
             credits,
             commission,
             root_slot,
+            id,
         }
     }
 
@@ -123,12 +144,24 @@ impl VoteState {
 
     pub fn process_vote(&mut self, vote: &Vote) {
         // Ignore votes for slots earlier than we already have votes for
-        if self
+        /*if self
             .votes
             .back()
             .map_or(false, |old_vote| old_vote.slot >= vote.slot)
         {
+            info!("ignoring old vote slot: {} last: {}", vote.slot, self.votes.back().unwrap().slot);
             return;
+        }*/
+        let tid = thread_rng().gen_range(500, 1000);
+        if let Some(last_vote) = self.votes.back() {
+            if last_vote.slot >= vote.slot {
+                info!("ignoring old vote slot: {} last: {} vote.len: {} tid: {} id: {}", vote.slot, last_vote.slot, self.votes.len(), tid, self.id);
+                return;
+            } else {
+                info!("new slot! {} old: {} votes.len: {} tid: {} id: {}", vote.slot, last_vote.slot, self.votes.len(), tid, self.id);
+            }
+        } else {
+            info!("no back! {} votes.len: {} tid: {} id: {}", vote.slot, self.votes.len(), tid, self.id);
         }
 
         let vote = Lockout::new(&vote);
@@ -136,15 +169,43 @@ impl VoteState {
         // TODO: Integrity checks
         // Verify the vote's bank hash matches what is expected
 
-        self.pop_expired_votes(vote.slot);
+        //info!("votes: {:?}", self.votes);
+        let expired = self.pop_expired_votes(vote.slot);
         // Once the stack is full, pop the oldest vote and distribute rewards
+        let front = if let Some(vote) = self.votes.front() {
+            vote.slot
+        } else {
+            0
+        };
+        let back = if let Some(vote) = self.votes.back() {
+            vote.slot
+        } else {
+            0
+        };
+
+        let vote_slot = vote.slot;
+        info!("vote: slot: {} votes.len: {} max: {} expired: {:?} len: {} first: {} end: {} id: {} tid: {}",
+              vote.slot, self.votes.len(), MAX_LOCKOUT_HISTORY, expired, expired.len(), front, back, self.id, tid);
         if self.votes.len() == MAX_LOCKOUT_HISTORY {
             let vote = self.votes.pop_front().unwrap();
             self.root_slot = Some(vote.slot);
             self.credits += 1;
         }
         self.votes.push_back(vote);
+
+        let front = if let Some(vote) = self.votes.front() {
+            vote.slot
+        } else {
+            0
+        };
+        let back = if let Some(vote) = self.votes.back() {
+            vote.slot
+        } else {
+            0
+        };
+
         self.double_lockouts();
+        info!("end vote: slot: {} votes.len: {} first: {} last: {} tid: {}", vote_slot, self.votes.len(), front, back, tid);
     }
 
     pub fn nth_recent_vote(&self, position: usize) -> Option<&Lockout> {
@@ -162,14 +223,16 @@ impl VoteState {
         self.credits
     }
 
-    fn pop_expired_votes(&mut self, slot: u64) {
+    fn pop_expired_votes(&mut self, slot: u64) -> Vec<Lockout> {
+        let mut votes = vec![];
         loop {
             if self.votes.back().map_or(false, |v| v.is_expired(slot)) {
-                self.votes.pop_back();
+                votes.push(self.votes.pop_back().unwrap());
             } else {
                 break;
             }
         }
+        votes
     }
 
     fn double_lockouts(&mut self) {

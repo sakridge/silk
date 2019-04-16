@@ -188,7 +188,7 @@ pub fn generate_offsets(batches: &[SharedPackets]) -> Result<TxOffsets> {
 pub fn ed25519_verify_cpu(batches: &[SharedPackets]) -> Vec<Vec<u8>> {
     use rayon::prelude::*;
     let count = batch_size(batches);
-    info!("CPU ECDSA for {}", batch_size(batches));
+    debug!("CPU ECDSA for {}", batch_size(batches));
     let rv = batches
         .into_par_iter()
         .map(|p| {

@@ -387,7 +387,7 @@ impl ReplayStage {
         let ancestors = bank_forks.read().unwrap().ancestors();
         let frozen_banks = bank_forks.read().unwrap().frozen_banks();
 
-        trace!("frozen_banks {}", frozen_banks.len());
+        debug!("frozen_banks {}", frozen_banks.len());
         let mut votable: Vec<(u128, Arc<Bank>)> = frozen_banks
             .values()
             .filter(|b| {
@@ -424,7 +424,7 @@ impl ReplayStage {
                 let vote_threshold =
                     locktower.check_vote_stake_threshold(b.slot(), &stake_lockouts);
                 Self::confirm_forks(locktower, stake_lockouts, progress, bank_forks);
-                debug!("bank vote_threshold: {} {}", b.slot(), vote_threshold);
+                trace!("bank vote_threshold: {} {}", b.slot(), vote_threshold);
                 vote_threshold
             })
             .map(|(b, stake_lockouts)| (locktower.calculate_weight(&stake_lockouts), b.clone()))
@@ -443,6 +443,8 @@ impl ReplayStage {
                 votable.len(),
                 weights
             );
+        } else {
+            //info!("no votable banks!");
         }
         inc_new_counter_info!("replay_stage-locktower_duration", ms as usize);
 

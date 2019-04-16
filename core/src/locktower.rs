@@ -237,6 +237,7 @@ impl Locktower {
 
     pub fn record_vote(&mut self, slot: u64) -> Option<u64> {
         let root_slot = self.lockouts.root_slot;
+        info!("record_vote: {}", slot);
         self.lockouts.process_vote(&Vote { slot });
         solana_metrics::submit(
             influxdb::Point::new("counter-locktower-vote")
