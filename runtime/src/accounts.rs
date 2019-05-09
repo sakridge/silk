@@ -355,6 +355,7 @@ impl Accounts {
         // Copy all the accounts
         for k in keys {
             let is_locked = {
+                //info!("locks.len: {}", fork_locks.len());
                 if fork_locks.contains(k) {
                     true
                 } else {
@@ -384,7 +385,7 @@ impl Accounts {
             };
             if is_locked {
                 error_counters.account_in_use += 1;
-                debug!("Account in use: {:?}", k);
+                info!("Account in use: {:?}", k);
                 return Err(TransactionError::AccountInUse);
             }
         }

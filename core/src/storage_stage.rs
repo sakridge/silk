@@ -154,6 +154,7 @@ impl StorageStage {
                     let mut current_key = 0;
                     let mut slot_count = 0;
                     loop {
+                        break;
                         if let Some(ref some_blocktree) = blocktree {
                             if let Err(e) = Self::process_entries(
                                 &storage_keypair,

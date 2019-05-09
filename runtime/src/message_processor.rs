@@ -1,5 +1,6 @@
 use crate::native_loader;
 use crate::system_instruction_processor;
+use crate::bank::PerfCounters;
 use solana_sdk::account::{create_keyed_accounts, Account, KeyedAccount};
 use solana_sdk::instruction::{CompiledInstruction, InstructionError};
 use solana_sdk::instruction_processor_utils;
@@ -7,8 +8,10 @@ use solana_sdk::message::Message;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::system_program;
 use solana_sdk::transaction::TransactionError;
+use solana_sdk::timing::duration_as_ns;
 use std::collections::HashMap;
 use std::sync::RwLock;
+use std::time::Instant;
 
 #[cfg(unix)]
 use libloading::os::unix::*;
@@ -124,7 +127,9 @@ impl MessageProcessor {
         executable_accounts: &mut [(Pubkey, Account)],
         program_accounts: &mut [&mut Account],
         tick_height: u64,
+        perf_counters: &mut PerfCounters,
     ) -> Result<(), InstructionError> {
+        let now = Instant::now();
         let program_id = instruction.program_id(message.program_ids());
 
         let mut keyed_accounts = create_keyed_accounts(executable_accounts);
@@ -140,25 +145,32 @@ impl MessageProcessor {
             .map(|((key, is_signer), account)| KeyedAccount::new(key, is_signer, account))
             .collect();
         keyed_accounts.append(&mut keyed_accounts2);
+        perf_counters.keyed += duration_as_ns(&now.elapsed());
 
+        let now = Instant::now();
         for (id, process_instruction) in &self.instruction_processors {
             if id == program_id {
-                return process_instruction(
+                let ret = process_instruction(
                     &program_id,
                     &mut keyed_accounts[1..],
                     &instruction.data,
                     tick_height,
                 );
+                perf_counters.instruction += duration_as_ns(&now.elapsed());
+                return ret;
             }
         }
 
-        native_loader::entrypoint(
+        let now = Instant::now();
+        let ret = native_loader::entrypoint(
             &program_id,
             &mut keyed_accounts,
             &instruction.data,
             tick_height,
             &self.symbol_cache,
-        )
+        );
+        perf_counters.native_loader += duration_as_ns(&now.elapsed());
+        ret
     }
 
     /// Execute an instruction
@@ -172,7 +184,9 @@ impl MessageProcessor {
         executable_accounts: &mut [(Pubkey, Account)],
         program_accounts: &mut [&mut Account],
         tick_height: u64,
+        perf_counters: &mut PerfCounters,
     ) -> Result<(), InstructionError> {
+        let now = Instant::now();
         let program_id = instruction.program_id(message.program_ids());
         // TODO: the runtime should be checking read/write access to memory
         // we are trusting the hard-coded programs not to clobber or allocate
@@ -181,15 +195,20 @@ impl MessageProcessor {
             .iter_mut()
             .map(|a| (a.owner, a.lamports, a.data.clone()))
             .collect();
+        perf_counters.make_accounts += duration_as_ns(&now.elapsed());
 
+        let now = Instant::now();
         self.process_instruction(
             message,
             instruction,
             executable_accounts,
             program_accounts,
             tick_height,
+            perf_counters,
         )?;
+        perf_counters.process_instruction += duration_as_ns(&now.elapsed());
 
+        let now = Instant::now();
         // Verify the instruction
         for ((pre_program_id, pre_lamports, pre_data), post_account) in
             pre_data.iter().zip(program_accounts.iter())
@@ -207,6 +226,7 @@ impl MessageProcessor {
         if pre_total != post_total {
             return Err(InstructionError::UnbalancedInstruction);
         }
+        perf_counters.post_process_instruction += duration_as_ns(&now.elapsed());
         Ok(())
     }
 
@@ -219,20 +239,30 @@ impl MessageProcessor {
         loaders: &mut [Vec<(Pubkey, Account)>],
         accounts: &mut [Account],
         tick_height: u64,
+        perf_counters: &mut PerfCounters,
     ) -> Result<(), TransactionError> {
+        let proc_start = Instant::now();
         for (instruction_index, instruction) in message.instructions.iter().enumerate() {
+            let now = Instant::now();
             let executable_accounts = &mut loaders[instruction.program_ids_index as usize];
             let mut program_accounts = get_subset_unchecked_mut(accounts, &instruction.accounts)
                 .map_err(|err| TransactionError::InstructionError(instruction_index as u8, err))?;
+            perf_counters.get_accounts += duration_as_ns(&now.elapsed());
+
+            let now = Instant::now();
             self.execute_instruction(
                 message,
                 instruction,
                 executable_accounts,
                 &mut program_accounts,
                 tick_height,
+                perf_counters,
             )
             .map_err(|err| TransactionError::InstructionError(instruction_index as u8, err))?;
+            perf_counters.exec_instruction += duration_as_ns(&now.elapsed());
+
         }
+        perf_counters.process_message += duration_as_ns(&proc_start.elapsed());
         Ok(())
     }
 }

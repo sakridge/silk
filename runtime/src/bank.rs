@@ -23,7 +23,7 @@ use solana_sdk::native_loader;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, Signature};
 use solana_sdk::system_transaction;
-use solana_sdk::timing::{duration_as_ms, duration_as_us, MAX_RECENT_BLOCKHASHES};
+use solana_sdk::timing::{duration_as_s, duration_as_ms, duration_as_us, MAX_RECENT_BLOCKHASHES};
 use solana_sdk::transaction::{Result, Transaction, TransactionError};
 use solana_vote_api::vote_state::MAX_LOCKOUT_HISTORY;
 use std::borrow::Borrow;
@@ -31,6 +31,19 @@ use std::cmp;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
+
+#[derive(Default, Debug)]
+pub struct PerfCounters {
+    pub instruction: u64,
+    pub exec_instruction: u64,
+    pub get_accounts: u64,
+    pub make_accounts: u64,
+    pub native_loader: u64,
+    pub process_message: u64,
+    pub process_instruction: u64,
+    pub post_process_instruction: u64,
+    pub keyed: u64,
+}
 
 pub const MINIMUM_SLOT_LENGTH: usize = MAX_LOCKOUT_HISTORY + 1;
 
@@ -657,10 +670,14 @@ impl Bank {
             max_age,
             &mut error_counters,
         );
+        let check_elapsed = now.elapsed();
+        let now = Instant::now();
         let mut loaded_accounts = self.load_accounts(txs, sig_results, &mut error_counters);
+        let load_elapsed = now.elapsed();
         let tick_height = self.tick_height();
 
-        let load_elapsed = now.elapsed();
+        let mut perf_counters = PerfCounters::default();
+
         let now = Instant::now();
         let executed: Vec<Result<()>> =
             loaded_accounts
@@ -670,17 +687,20 @@ impl Bank {
                     Err(e) => Err(e.clone()),
                     Ok((ref mut accounts, ref mut loaders)) => self
                         .message_processor
-                        .process_message(tx.message(), loaders, accounts, tick_height),
+                        .process_message(tx.message(), loaders, accounts, tick_height, &mut perf_counters),
                 })
                 .collect();
 
         let execution_elapsed = now.elapsed();
 
-        debug!(
-            "load: {}us execute: {}us txs_len={}",
+        info!(
+            "load: {}us execute: {}us check: {}us counters: {:?} txs_len: {} rate/s: {}",
             duration_as_us(&load_elapsed),
             duration_as_us(&execution_elapsed),
+            duration_as_us(&check_elapsed),
+            perf_counters,
             txs.len(),
+            txs.len() as f32 / (duration_as_s(&load_elapsed) + duration_as_s(&execution_elapsed)),
         );
         let mut tx_count = 0;
         let mut err_count = 0;

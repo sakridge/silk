@@ -3,6 +3,10 @@ use crate::recvmmsg::{recv_mmsg, NUM_RCVMMSGS};
 use crate::result::{Error, Result};
 use bincode;
 use byteorder::{ByteOrder, LittleEndian};
+use std::thread::sleep;
+use std::time::{Instant, Duration};
+use solana_sdk::timing::duration_as_ms;
+use solana_sdk::timing;
 use serde::Serialize;
 use solana_metrics::counter::Counter;
 use solana_sdk::hash::Hash;
@@ -222,14 +226,23 @@ impl Packets {
         //  * set it back to blocking before returning
         socket.set_nonblocking(false)?;
         trace!("receiving on {}", socket.local_addr().unwrap());
+        let mut err0 = false;
+        let mut npkts_mismatch = false;
+        let mut err_count = 0;
+        let now = Instant::now();
         loop {
             self.packets.resize(i + NUM_RCVMMSGS, Packet::default());
             match recv_mmsg(socket, &mut self.packets[i..]) {
                 Err(_) if i > 0 => {
-                    break;
+                    err0 = true;
+                    err_count += 1;
+                    if i > 1024 || err_count > 10 {
+                        break;
+                    }
+                    sleep(Duration::from_micros(100));
                 }
                 Err(e) => {
-                    trace!("recv_from err {:?}", e);
+                    info!("recv_from err {:?}", e);
                     return Err(Error::IO(e));
                 }
                 Ok(npkts) => {
@@ -238,13 +251,15 @@ impl Packets {
                     }
                     trace!("got {} packets", npkts);
                     i += npkts;
-                    if npkts != NUM_RCVMMSGS || i >= 1024 {
+                    if i >= 1024 || duration_as_ms(&now.elapsed()) > 2 {
+                        npkts_mismatch = npkts != NUM_RCVMMSGS;
                         break;
                     }
                 }
             }
         }
         self.packets.truncate(i);
+        info!("{} received packets: {} err: {} mismatch: {} error_count: {}", timing::timestamp(), i, err0, npkts_mismatch, err_count);
         inc_new_counter_info!("packets-recv_count", i);
         Ok(i)
     }

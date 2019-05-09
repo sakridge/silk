@@ -23,6 +23,7 @@ use solana_sdk::system_transaction;
 use solana_sdk::timing::{
     duration_as_ms, timestamp, DEFAULT_TICKS_PER_SLOT, MAX_RECENT_BLOCKHASHES,
 };
+use std::thread::sleep;
 use std::iter;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{channel, Receiver};
@@ -104,7 +105,7 @@ fn bench_banking_stage_multi_accounts(bencher: &mut Bencher) {
         assert!(r.is_ok(), "sanity parallel execution");
     }
     bank.clear_signatures();
-    let verified: Vec<_> = to_packets_chunked(&transactions.clone(), 192)
+    let verified: Vec<_> = to_packets_chunked(&transactions.clone(), 1)
         .into_iter()
         .map(|x| {
             let len = x.packets.len();
@@ -138,12 +139,13 @@ fn bench_banking_stage_multi_accounts(bencher: &mut Bencher) {
         let signal_receiver2 = signal_receiver.clone();
         bencher.iter(move || {
             let now = Instant::now();
-            for v in verified[start..start + half_len].chunks(verified.len() / num_threads) {
-                trace!("sending... {}..{} {}", start, start + half_len, timestamp());
+            for v in verified[start..start + half_len].chunks(1) { //verified.len() / num_threads) {
+                println!("sending... {}..{} {} {}", start, start + half_len, timestamp(), v[0].0.packets.len());
                 verified_sender.send(v.to_vec()).unwrap();
+                //sleep(Duration::from_millis(10));
             }
             check_txs(&signal_receiver2, txes / 2);
-            trace!(
+            println!(
                 "time: {} checked: {}",
                 duration_as_ms(&now.elapsed()),
                 txes / 2

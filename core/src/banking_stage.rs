@@ -63,7 +63,8 @@ impl BankingStage {
             poh_recorder,
             verified_receiver,
             verified_vote_receiver,
-            cmp::min(2, Self::num_threads()),
+            //cmp::min(2, Self::num_threads()),
+            2
         )
     }
 
@@ -238,10 +239,12 @@ impl BankingStage {
 
         match decision {
             BufferedPacketsDecision::Consume => {
+                info!("{} consuming buffered", timing::timestamp());
                 Self::consume_buffered_packets(poh_recorder, buffered_packets)
             }
             BufferedPacketsDecision::Forward => {
                 if enable_forwarding {
+                    info!("{} forwarding buffered", timing::timestamp());
                     next_leader.map_or(Ok(buffered_packets.to_vec()), |leader_id| {
                         rcluster_info.lookup(&leader_id).map_or(
                             Ok(buffered_packets.to_vec()),
@@ -256,10 +259,14 @@ impl BankingStage {
                         )
                     })
                 } else {
+                    info!("{} clearing buffered", timing::timestamp());
                     Ok(vec![])
                 }
             }
-            _ => Ok(buffered_packets.to_vec()),
+            _ => {
+                info!("{} returning buffered", timing::timestamp());
+                Ok(buffered_packets.to_vec())
+            }
         }
     }
 
@@ -273,6 +280,9 @@ impl BankingStage {
         let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
         let mut buffered_packets = vec![];
         loop {
+            if !buffered_packets.is_empty() {
+                info!("{} checking buffered {}", timing::timestamp(), buffered_packets.len());
+            }
             if !buffered_packets.is_empty() {
                 Self::process_buffered_packets(
                     &socket,
@@ -292,13 +302,17 @@ impl BankingStage {
                 Duration::from_millis(10)
             } else {
                 // Default wait time
-                Duration::from_millis(100)
+                Duration::from_millis(2)
             };
 
             match Self::process_packets(&verified_receiver, &poh_recorder, recv_start, recv_timeout)
             {
                 Err(Error::RecvTimeoutError(RecvTimeoutError::Timeout)) => (),
                 Ok(unprocessed_packets) => {
+                    info!("{} unprocessed {}", timing::timestamp(), unprocessed_packets.len());
+                    for x in &unprocessed_packets {
+                        info!("unprocessed: {:?}", x.1.len());
+                    }
                     if unprocessed_packets.is_empty() {
                         continue;
                     }
@@ -307,7 +321,9 @@ impl BankingStage {
                         .map(|(_, unprocessed)| unprocessed.len())
                         .sum();
                     inc_new_counter_info!("banking_stage-buffered_packets", num);
-                    buffered_packets.extend_from_slice(&unprocessed_packets);
+                    if num > 0 {
+                        buffered_packets.extend_from_slice(&unprocessed_packets);
+                    }
                 }
                 Err(err) => {
                     debug!("solana-banking-stage-tx: exit due to {:?}", err);
@@ -318,7 +334,8 @@ impl BankingStage {
     }
 
     pub fn num_threads() -> u32 {
-        sys_info::cpu_num().unwrap_or(NUM_THREADS)
+        8
+        //sys_info::cpu_num().unwrap_or(NUM_THREADS)
     }
 
     /// Convert the transactions from a blob of binary data to a vector of transactions
@@ -367,6 +384,7 @@ impl BankingStage {
         poh: &Arc<Mutex<PohRecorder>>,
         lock_results: &LockedAccountsResults<Transaction>,
     ) -> Result<()> {
+        info!("process_and_record start: {}", timing::timestamp());
         let now = Instant::now();
         // Use a shorter maximum age when adding transactions into the pipeline.  This will reduce
         // the likelihood of any single thread getting starved and processing old ids.
@@ -392,13 +410,14 @@ impl BankingStage {
 
         drop(record_locks);
 
-        debug!(
-            "bank: {} load_execute: {}us record: {}us commit: {}us txs_len: {}",
+        info!(
+            "bank: {} load_execute: {}us record: {}us commit: {}us txs_len: {} done: {}",
             bank.slot(),
             duration_as_us(&load_execute_time),
             duration_as_us(&record_time),
             duration_as_us(&commit_time),
             txs.len(),
+            timing::timestamp(),
         );
 
         Ok(())
@@ -421,11 +440,18 @@ impl BankingStage {
             .iter()
             .zip(chunk_offset..)
             .filter_map(|(res, index)| match res {
-                Err(TransactionError::AccountInUse) => Some(index),
+                Err(TransactionError::AccountInUse) => {
+                    info!("account in use {}", index);
+                    Some(index)
+                }
                 Ok(_) => None,
                 Err(_) => None,
             })
             .collect();
+
+        for x in &unprocessed_txs {
+            info!("unprocessed: {:?}", x);
+        }
 
         let results = Self::process_and_record_transactions_locked(bank, txs, poh, &lock_results);
 
@@ -434,12 +460,13 @@ impl BankingStage {
         drop(lock_results);
         let unlock_time = now.elapsed();
 
-        debug!(
-            "bank: {} lock: {}us unlock: {}us txs_len: {}",
+        info!(
+            "bank: {} lock: {}us unlock: {}us txs_len: {} unprocessed: {}",
             bank.slot(),
             duration_as_us(&lock_time),
             duration_as_us(&unlock_time),
             txs.len(),
+            unprocessed_txs.len(),
         );
 
         (results, unprocessed_txs)
@@ -464,14 +491,18 @@ impl BankingStage {
                     &Entry::serialized_to_blob_size,
                 );
 
+            let now = Instant::now();
             let (result, unprocessed_txs_in_chunk) = Self::process_and_record_transactions(
                 bank,
                 &transactions[chunk_start..chunk_end],
                 poh,
                 chunk_start,
             );
-            trace!("process_transactions: {:?}", result);
-            unprocessed_txs.extend_from_slice(&unprocessed_txs_in_chunk);
+            info!("process_and_record: {}us len={} unprocessed: {}", duration_as_us(&now.elapsed()), chunk_end - chunk_start, unprocessed_txs_in_chunk.len());
+            trace!("process_and_record_transactions: {:?}", result);
+            if !unprocessed_txs_in_chunk.is_empty() {
+                unprocessed_txs.extend_from_slice(&unprocessed_txs_in_chunk);
+            }
             if let Err(Error::PohRecorderError(PohRecorderError::MaxHeightReached)) = result {
                 info!(
                     "process transactions: max height reached slot: {} height: {}",
@@ -570,9 +601,12 @@ impl BankingStage {
         let (processed, unprocessed_tx_indexes) =
             Self::process_transactions(bank, &transactions, poh)?;
 
+        let now = Instant::now();
         let filter =
             Self::prepare_filter_for_pending_transactions(&transactions, &unprocessed_tx_indexes);
+        let filter_elapsed = now.elapsed();
 
+        let now = Instant::now();
         let mut error_counters = ErrorCounters::default();
         let result = bank.check_transactions(
             &transactions,
@@ -580,12 +614,21 @@ impl BankingStage {
             MAX_RECENT_BLOCKHASHES / 2,
             &mut error_counters,
         );
+        let check_elapsed = now.elapsed();
 
-        Ok((
+        let now = Instant::now();
+        let ret = Ok((
             processed,
             tx_len,
             Self::filter_valid_transaction_indexes(&result, &transaction_indexes),
-        ))
+        ));
+        let ret_elapsed = now.elapsed();
+        info!("filter: {}us check: {}us ret: {}us",
+              duration_as_us(&filter_elapsed),
+              duration_as_us(&check_elapsed),
+              duration_as_us(&ret_elapsed),
+              );
+        ret
     }
 
     /// Process the incoming packets
@@ -595,14 +638,27 @@ impl BankingStage {
         recv_start: &mut Instant,
         recv_timeout: Duration,
     ) -> Result<UnprocessedPackets> {
-        let mms = verified_receiver
+        let mut mms = verified_receiver
             .lock()
             .unwrap()
             .recv_timeout(recv_timeout)?;
 
         let mms_len = mms.len();
-        let count = mms.iter().map(|x| x.1.len()).sum();
-        debug!(
+        let mut count: usize = mms.iter().map(|x| x.1.len()).sum();
+        while count < 100 {
+            if let Ok(new) = verified_receiver.lock().unwrap().try_recv() {
+                let new_sum: usize = new.iter().map(|x| x.1.len()).sum();
+                count += new_sum;
+                if count > 100 {
+                    break;
+                }
+                mms.extend(new);
+            } else {
+                info!("nothing in the channel, breaking with count: {}", count);
+                break;
+            }
+        }
+        info!(
             "@{:?} process start stalled for: {:?}ms txs: {}",
             timing::timestamp(),
             timing::duration_as_ms(&recv_start.elapsed()),
@@ -638,6 +694,7 @@ impl BankingStage {
             if processed < verified_txs_len {
                 bank_shutdown = true;
             }
+            info!("unprocessed: {:?}", unprocessed_indexes);
             // Collect any unprocessed transactions in this batch for forwarding
             if !unprocessed_indexes.is_empty() {
                 unprocessed_packets.push((msgs, unprocessed_indexes));
@@ -651,12 +708,12 @@ impl BankingStage {
             timing::duration_as_ms(&proc_start.elapsed()) as usize
         );
         let total_time_s = timing::duration_as_s(&proc_start.elapsed());
-        let total_time_ms = timing::duration_as_ms(&proc_start.elapsed());
-        debug!(
-            "@{:?} done processing transaction batches: {} time: {:?}ms tx count: {} tx/s: {}",
+        let total_time_us = timing::duration_as_us(&proc_start.elapsed());
+        info!(
+            "@{:?} done processing transaction batches: {} time: {:?}us tx count: {} tx/s: {}",
             timing::timestamp(),
             mms_len,
-            total_time_ms,
+            total_time_us,
             new_tx_count,
             (new_tx_count as f32) / (total_time_s)
         );

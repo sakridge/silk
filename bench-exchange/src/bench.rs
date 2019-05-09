@@ -921,16 +921,17 @@ mod tests {
         solana_logger::setup();
 
         const NUM_NODES: usize = 1;
-        let fullnode_config = FullnodeConfig::default();
+        let mut fullnode_config = FullnodeConfig::default();
+        fullnode_config.sigverify_disabled = true;
 
         let mut config = Config::default();
         config.identity = Keypair::new();
-        config.duration = Duration::from_secs(1);
+        config.duration = Duration::from_secs(120);
         config.fund_amount = 100_000;
         config.threads = 1;
-        config.transfer_delay = 20; // 15
-        config.batch_size = 100; // 1000;
-        config.chunk_size = 10; // 200;
+        config.transfer_delay = 3; // 15
+        config.batch_size = 540; // 1000;
+        config.chunk_size = 180; // 200;
         config.account_groups = 1; // 10;
         let Config {
             fund_amount,
