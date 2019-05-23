@@ -23,8 +23,8 @@ if [[ -z $1 ]]; then # default behavior
   $solana_bench_tps \
     --entrypoint 127.0.0.1:8001 \
     --drone 127.0.0.1:9900 \
-    --duration 90 \
-    --tx_count 50000 \
+    --duration 120 \
+    --tx_count 200000 \
 
 else
   $solana_bench_tps "$@"

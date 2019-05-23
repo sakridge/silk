@@ -2,6 +2,7 @@
 use crate::recvmmsg::{recv_mmsg, NUM_RCVMMSGS};
 use crate::result::{Error, Result};
 use bincode;
+use std::time::Instant;
 use byteorder::{ByteOrder, LittleEndian};
 use serde::Serialize;
 use solana_metrics::inc_new_counter_debug;
@@ -222,11 +223,14 @@ impl Packets {
         //  * set it back to blocking before returning
         socket.set_nonblocking(false)?;
         trace!("receiving on {}", socket.local_addr().unwrap());
+        let start = Instant::now();
         loop {
             self.packets.resize(i + NUM_RCVMMSGS, Packet::default());
             match recv_mmsg(socket, &mut self.packets[i..]) {
                 Err(_) if i > 0 => {
-                    break;
+                    if i >= 1024 || start.elapsed().as_millis() > 1 {
+                        break;
+                    }
                 }
                 Err(e) => {
                     trace!("recv_from err {:?}", e);
@@ -238,7 +242,7 @@ impl Packets {
                     }
                     trace!("got {} packets", npkts);
                     i += npkts;
-                    if npkts != NUM_RCVMMSGS || i >= 1024 {
+                    if i >= 1024 || start.elapsed().as_millis() > 1 {
                         break;
                     }
                 }

@@ -139,6 +139,7 @@ where
         // ping-pong between source and destination accounts for each loop iteration
         // this seems to be faster than trying to determine the balance of individual
         // accounts
+        let blockhash_start = Instant::now();
         let len = tx_count as usize;
         if let Ok((new_blockhash, _fee_calculator)) = client.get_new_blockhash(&blockhash) {
             blockhash = new_blockhash;
@@ -148,6 +149,9 @@ where
             }
             sleep(Duration::from_millis(100));
             continue;
+        }
+        if blockhash_start.elapsed().as_millis() > 50 {
+            println!("Took {:} ms to get new blockhash, consider a larger batch size.", blockhash_start.elapsed().as_millis());
         }
         blockhash_time = Instant::now();
         let balance = client.get_balance(&id.pubkey()).unwrap_or(0);
@@ -208,7 +212,7 @@ where
 }
 
 fn metrics_submit_lamport_balance(lamport_balance: u64) {
-    println!("Token balance: {}", lamport_balance);
+    info!("Token balance: {}", lamport_balance);
     datapoint_info!(
         "bench-tps-lamport_balance",
         ("balance", lamport_balance, i64)
@@ -224,7 +228,7 @@ fn generate_txs(
     reclaim: bool,
 ) {
     let tx_count = source.len();
-    println!("Signing transactions... {} (reclaim={})", tx_count, reclaim);
+    info!("Signing transactions... {} (reclaim={})", tx_count, reclaim);
     let signing_start = Instant::now();
 
     let pairs: Vec<_> = if !reclaim {
@@ -246,7 +250,7 @@ fn generate_txs(
     let ns = duration.as_secs() * 1_000_000_000 + u64::from(duration.subsec_nanos());
     let bsps = (tx_count) as f64 / ns as f64;
     let nsps = ns as f64 / (tx_count) as f64;
-    println!(
+    info!(
         "Done. {:.2} thousand signatures per second, {:.2} us per signature, {} ms total time, {}",
         bsps * 1_000_000_f64,
         nsps / 1_000_f64,
@@ -287,7 +291,7 @@ fn do_tx_transfers<T: Client>(
         }
         if let Some(txs0) = txs {
             shared_tx_thread_count.fetch_add(1, Ordering::Relaxed);
-            println!(
+            info!(
                 "Transferring 1 unit {} times... to {}",
                 txs0.len(),
                 client.as_ref().transactions_addr(),
@@ -305,7 +309,7 @@ fn do_tx_transfers<T: Client>(
             }
             shared_tx_thread_count.fetch_add(-1, Ordering::Relaxed);
             total_tx_sent_count.fetch_add(tx_len, Ordering::Relaxed);
-            println!(
+            info!(
                 "Tx send done. {} ms {} tps",
                 duration_as_ms(&transfer_start.elapsed()),
                 tx_len as f32 / duration_as_s(&transfer_start.elapsed()),
@@ -394,7 +398,7 @@ pub fn fund_keys<T: Client>(client: &T, source: &Keypair, dests: &[Keypair], lam
                     .iter()
                     .fold(0, |len, (_, tx)| len + tx.message().instructions.len());
 
-                println!(
+                info!(
                     "{} {} to {} in {} txs",
                     if tries == 0 {
                         "transferring"

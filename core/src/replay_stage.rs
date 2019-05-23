@@ -239,7 +239,7 @@ impl ReplayStage {
                     );
                     cluster_info.write().unwrap().set_leader(&next_leader);
                     if next_leader == *my_id && reached_leader_tick {
-                        debug!("{} starting tpu for slot {}", my_id, poh_slot);
+                        info!("{} starting tpu for slot {}", my_id, poh_slot);
                         datapoint_warn!(
                             "replay_stage-new_leader",
                             ("count", poh_slot, i64),
@@ -251,7 +251,7 @@ impl ReplayStage {
                                 bank_forks.read().unwrap().working_bank().slot(),
                                 tpu_bank.slot()
                             );
-                            debug!(
+                            info!(
                                 "poh_recorder new working bank: me: {} next_slot: {} next_leader: {}",
                                 my_id,
                                 tpu_bank.slot(),

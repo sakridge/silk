@@ -212,6 +212,7 @@ impl PohRecorder {
         };
         self.ticks_per_slot = bank.ticks_per_slot();
         self.set_working_bank(working_bank);
+        info!("set working_bank");
     }
 
     // Flush cache will delay flushing the cache for a bank until it past the WorkingBank::min_tick_height

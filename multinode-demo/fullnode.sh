@@ -225,7 +225,8 @@ if [[ $node_type = bootstrap_leader ]]; then
   : "${fullnode_keypair_path:="$SOLANA_CONFIG_DIR"/bootstrap-leader-keypair.json}"
   fullnode_vote_keypair_path="$SOLANA_CONFIG_DIR"/bootstrap-leader-vote-keypair.json
   ledger_config_dir="$SOLANA_CONFIG_DIR"/bootstrap-leader-ledger
-  accounts_config_dir="$SOLANA_CONFIG_DIR"/bootstrap-leader-accounts
+  #accounts_config_dir="$SOLANA_CONFIG_DIR"/bootstrap-leader-accounts
+  accounts_config_dir="/media/nvme0/0,/media/nvme1/0"
   fullnode_storage_keypair_path=$SOLANA_CONFIG_DIR/bootstrap-leader-storage-keypair.json
 
 
