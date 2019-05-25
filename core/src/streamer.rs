@@ -23,6 +23,7 @@ fn recv_loop(
     recycler: &PacketsRecycler,
     name: &'static str,
 ) -> Result<()> {
+    let mut packet_sizes = vec![];
     loop {
         let mut msgs = Packets::new_with_recycler(recycler.clone(), 256, name);
         loop {
@@ -32,6 +33,11 @@ fn recv_loop(
                 return Ok(());
             }
             if let Ok(_len) = msgs.recv_from(sock) {
+                packet_sizes.push(_len);
+                if packet_sizes.len() > 16 {
+                    info!("packets: {:?}", packet_sizes);
+                    packet_sizes.clear();
+                }
                 channel.send(msgs)?;
                 break;
             }
