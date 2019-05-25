@@ -171,7 +171,7 @@ impl VoteState {
                     }
                 }
             }
-            return;
+            //return;
         }
 
         let vote = Lockout::new(&vote);
