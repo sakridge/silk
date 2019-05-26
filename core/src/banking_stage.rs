@@ -131,13 +131,20 @@ impl BankingStage {
         tpu_via_blobs: &std::net::SocketAddr,
         unprocessed_packets: &[PacketsAndOffsets],
     ) -> std::io::Result<()> {
+        let now = Instant::now();
         let packets = Self::filter_valid_packets_for_forwarding(unprocessed_packets);
         inc_new_counter_info!("banking_stage-forwarded_packets", packets.len());
+        let packets_len = packets.len();
         let blobs = packet::packets_to_blobs(&packets);
 
         for blob in blobs {
             socket.send_to(&blob.data[..blob.meta.size], tpu_via_blobs)?;
         }
+        info!(
+            "forwarded {} packets in {} ms",
+            packets_len,
+            timing::duration_as_ms(&now.elapsed())
+        );
 
         Ok(())
     }
@@ -146,11 +153,23 @@ impl BankingStage {
         my_pubkey: &Pubkey,
         poh_recorder: &Arc<Mutex<PohRecorder>>,
         buffered_packets: &mut Vec<PacketsAndOffsets>,
+        recv_start: &mut Instant,
+        id: u32,
     ) -> Result<UnprocessedPackets> {
         let mut unprocessed_packets = vec![];
         let mut rebuffered_packets = 0;
         let mut new_tx_count = 0;
         let buffered_len = buffered_packets.len();
+
+        let count: usize = buffered_packets.iter().map(|x| x.1.len()).sum();
+        info!(
+            "@{:?} buffered process start stalled for: {:?}ms packets: {} id: {}",
+            timing::timestamp(),
+            timing::duration_as_ms(&recv_start.elapsed()),
+            count,
+            id,
+        );
+
         let mut buffered_packets_iter = buffered_packets.drain(..);
 
         let proc_start = Instant::now();
@@ -196,18 +215,21 @@ impl BankingStage {
         let total_time_s = timing::duration_as_s(&proc_start.elapsed());
         let total_time_ms = timing::duration_as_ms(&proc_start.elapsed());
 
-        debug!(
-            "@{:?} done processing buffered batches: {} time: {:?}ms tx count: {} tx/s: {}",
+        info!(
+            "@{:?} done processing buffered batches: {} time: {:?}ms tx count: {} tx/s: {} id: {}",
             timing::timestamp(),
             buffered_len,
             total_time_ms,
             new_tx_count,
-            (new_tx_count as f32) / (total_time_s)
+            (new_tx_count as f32) / (total_time_s),
+            id,
         );
 
         inc_new_counter_info!("banking_stage-rebuffered_packets", rebuffered_packets);
         inc_new_counter_info!("banking_stage-consumed_buffered_packets", new_tx_count);
         inc_new_counter_debug!("banking_stage-process_transactions", new_tx_count);
+
+        *recv_start = Instant::now();
 
         Ok(unprocessed_packets)
     }
@@ -246,6 +268,8 @@ impl BankingStage {
         cluster_info: &Arc<RwLock<ClusterInfo>>,
         buffered_packets: &mut Vec<PacketsAndOffsets>,
         enable_forwarding: bool,
+        recv_start: &mut Instant,
+        id: u32,
     ) -> Result<()> {
         let rcluster_info = cluster_info.read().unwrap();
 
@@ -269,6 +293,8 @@ impl BankingStage {
                     &rcluster_info.id(),
                     poh_recorder,
                     buffered_packets,
+                    recv_start,
+                    id,
                 )?;
                 buffered_packets.append(&mut unprocessed);
                 Ok(())
@@ -315,6 +341,8 @@ impl BankingStage {
                     cluster_info,
                     &mut buffered_packets,
                     enable_forwarding,
+                    recv_start,
+                    id,
                 )
                 .unwrap_or_else(|_| buffered_packets.clear());
             }
@@ -326,7 +354,7 @@ impl BankingStage {
                 Duration::from_millis(10)
             } else {
                 // Default wait time
-                Duration::from_millis(100)
+                Duration::from_millis(10)
             };
 
             match Self::process_packets(
@@ -708,7 +736,7 @@ impl BankingStage {
 
         let mms_len = mms.len();
         let count: usize = mms.iter().map(|x| x.1.len()).sum();
-        debug!(
+        info!(
             "@{:?} process start stalled for: {:?}ms txs: {} id: {}",
             timing::timestamp(),
             timing::duration_as_ms(&recv_start.elapsed()),
@@ -762,7 +790,7 @@ impl BankingStage {
         );
         let total_time_s = timing::duration_as_s(&proc_start.elapsed());
         let total_time_ms = timing::duration_as_ms(&proc_start.elapsed());
-        debug!(
+        info!(
             "@{:?} done processing transaction batches: {} time: {:?}ms tx count: {} tx/s: {} total count: {} id: {}",
             timing::timestamp(),
             mms_len,
