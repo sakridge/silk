@@ -18,6 +18,8 @@
 //! tracks the number of commits to the entire data store. So the latest
 //! commit for each fork entry would be indexed.
 
+use crate::bank::PerfStats;
+use std::time::Instant;
 use crate::accounts_index::{AccountsIndex, Fork};
 use crate::append_vec::{AppendVec, StorageMeta, StoredAccount};
 use bincode::{deserialize_from, serialize_into, serialized_size};
@@ -28,6 +30,7 @@ use rayon::ThreadPool;
 use serde::de::{MapAccess, Visitor};
 use serde::ser::{SerializeMap, Serializer};
 use serde::{Deserialize, Serialize};
+use solana_sdk::timing::duration_as_ns;
 use solana_sdk::account::Account;
 use solana_sdk::pubkey::Pubkey;
 use std::collections::{HashMap, HashSet};
@@ -391,16 +394,26 @@ impl AccountsDB {
         Self::load(&storage, ancestors, &accounts_index, pubkey)
     }
 
-    fn find_storage_candidate(&self, fork_id: Fork) -> Arc<AccountStorageEntry> {
+    fn find_storage_candidate(&self, fork_id: Fork, stats: &mut PerfStats) -> Arc<AccountStorageEntry> {
+        let now = Instant::now();
         let stores = self.storage.read().unwrap();
 
+        let mut stores_len = 0;
         if let Some(fork_stores) = stores.0.get(&fork_id) {
             if !fork_stores.is_empty() {
+
+                let num = thread_rng().gen_range(0, 500);
+                if num == 0 {
+                    //let forks: Vec<_> = stores.values().map(|x| x.fork_id).collect();
+                    info!("stores: fork: {:?} candidates: {}", fork_id, stores_len);
+                }
+
                 // pick an available store at random by iterating from a random point
                 let to_skip = thread_rng().gen_range(0, stores.0.len());
 
                 for (i, store) in fork_stores.values().cycle().skip(to_skip).enumerate() {
                     if store.try_available() {
+                        stats.fork_search += duration_as_ns(&now.elapsed());
                         return store.clone();
                     }
                     // looked at every store, bail...
@@ -409,15 +422,25 @@ impl AccountsDB {
                     }
                 }
             }
+            stores_len = fork_stores.len();
         }
         drop(stores);
 
+        stats.fork_search += duration_as_ns(&now.elapsed());
+
+        info!("creating storage {} candidates: {}",
+              fork_id, stores_len);
+
+        let now = Instant::now();
         let mut stores = self.storage.write().unwrap();
         let path_index = thread_rng().gen_range(0, self.paths.len());
         let fork_storage = stores.0.entry(fork_id).or_insert_with(HashMap::new);
         let store = Arc::new(self.new_storage_entry(fork_id, &self.paths[path_index]));
         store.try_available();
         fork_storage.insert(store.id, store.clone());
+
+        stats.new_stores += duration_as_ns(&now.elapsed());
+
         store
     }
 
@@ -429,7 +452,8 @@ impl AccountsDB {
         }
     }
 
-    fn store_accounts(&self, fork_id: Fork, accounts: &[(&Pubkey, &Account)]) -> Vec<AccountInfo> {
+    fn store_accounts(&self, fork_id: Fork, accounts: &[(&Pubkey, &Account)], stats: &mut PerfStats) -> Vec<AccountInfo> {
+        let now = Instant::now();
         let with_meta: Vec<(StorageMeta, &Account)> = accounts
             .iter()
             .map(|(pubkey, account)| {
@@ -447,14 +471,23 @@ impl AccountsDB {
                 (meta, *account)
             })
             .collect();
-        let mut infos: Vec<AccountInfo> = vec![];
+        stats.metas += duration_as_ns(&now.elapsed());
+        let mut infos: Vec<AccountInfo> = Vec::with_capacity(with_meta.len());
         while infos.len() < with_meta.len() {
-            let storage = self.find_storage_candidate(fork_id);
+            let now = Instant::now();
+            let storage = self.find_storage_candidate(fork_id, stats);
+            stats.get_fork += duration_as_ns(&now.elapsed());
+
+            let now = Instant::now();
             let rvs = storage.accounts.append_accounts(&with_meta[infos.len()..]);
+            stats.append += duration_as_ns(&now.elapsed());
+
+            let now = Instant::now();
             if rvs.is_empty() {
                 storage.set_status(AccountStorageStatus::Full);
                 continue;
             }
+
             for (offset, (_, account)) in rvs.iter().zip(&with_meta[infos.len()..]) {
                 storage.add_account();
                 infos.push(AccountInfo {
@@ -465,6 +498,7 @@ impl AccountsDB {
             }
             // restore the state to available
             storage.set_status(AccountStorageStatus::Available);
+            stats.infos += duration_as_ns(&now.elapsed());
         }
         infos
     }
@@ -475,8 +509,8 @@ impl AccountsDB {
         infos: Vec<AccountInfo>,
         accounts: &[(&Pubkey, &Account)],
     ) -> Vec<(Fork, AccountInfo)> {
+        let mut reclaims = Vec::with_capacity(infos.len());
         let mut index = self.accounts_index.write().unwrap();
-        let mut reclaims = vec![];
         for (i, info) in infos.into_iter().enumerate() {
             let key = &accounts[i].0;
             reclaims.extend(index.insert(fork_id, key, info).into_iter())
@@ -516,27 +550,40 @@ impl AccountsDB {
         dead_forks
     }
 
-    fn cleanup_dead_forks(&self, dead_forks: &mut HashSet<Fork>) {
+    fn cleanup_dead_forks(&self, dead_forks: &mut HashSet<Fork>, stats: &mut PerfStats) {
         let mut index = self.accounts_index.write().unwrap();
+        let now = Instant::now();
         // a fork is not totally dead until it is older than the root
         dead_forks.retain(|fork| *fork < index.last_root);
         for fork in dead_forks.iter() {
             index.cleanup_dead_fork(*fork);
         }
+        stats.cleanup_dead_forks_work += duration_as_ns(&now.elapsed());
     }
 
     /// Store the account update.
-    pub fn store(&self, fork_id: Fork, accounts: &[(&Pubkey, &Account)]) {
-        let infos = self.store_accounts(fork_id, accounts);
+    pub fn store(&self, fork_id: Fork, accounts: &[(&Pubkey, &Account)], stats: &mut PerfStats) {
+        let now = Instant::now();
+        let infos = self.store_accounts(fork_id, accounts, stats);
+        stats.store_accounts += duration_as_ns(&now.elapsed());
+        let now = Instant::now();
         let reclaims = self.update_index(fork_id, infos, accounts);
+        stats.update_index += duration_as_ns(&now.elapsed());
+
         trace!("reclaim: {}", reclaims.len());
+        let now = Instant::now();
         let mut dead_forks = self.remove_dead_accounts(reclaims);
+        stats.remove_dead_forks += duration_as_ns(&now.elapsed());
         trace!("dead_forks: {}", dead_forks.len());
-        self.cleanup_dead_forks(&mut dead_forks);
+        let now = Instant::now();
+        self.cleanup_dead_forks(&mut dead_forks, stats);
+        stats.cleanup_dead_forks += duration_as_ns(&now.elapsed());
         trace!("purge_forks: {}", dead_forks.len());
+        let now = Instant::now();
         for fork in dead_forks {
             self.purge_fork(fork);
         }
+        stats.purge_total += duration_as_ns(&now.elapsed());
     }
 
     pub fn add_root(&self, fork: Fork) {
@@ -737,7 +784,8 @@ mod tests {
         let key = Pubkey::default();
         let account0 = Account::new(1, 0, &key);
 
-        db.store(0, &[(&key, &account0)]);
+        let mut stats = PerfStats::default();
+        db.store(0, &[(&key, &account0)], &mut stats);
         db.add_root(0);
         let ancestors = vec![(1, 1)].into_iter().collect();
         assert_eq!(db.load_slow(&ancestors, &key), Some((account0, 0)));
@@ -751,10 +799,11 @@ mod tests {
         let key = Pubkey::default();
         let account0 = Account::new(1, 0, &key);
 
-        db.store(0, &[(&key, &account0)]);
+        let mut stats = PerfStats::default();
+        db.store(0, &[(&key, &account0)], &mut stats);
 
         let account1 = Account::new(0, 0, &key);
-        db.store(1, &[(&key, &account1)]);
+        db.store(1, &[(&key, &account1)], &mut stats);
 
         let ancestors = vec![(1, 1)].into_iter().collect();
         assert_eq!(&db.load_slow(&ancestors, &key).unwrap().0, &account1);
@@ -771,10 +820,11 @@ mod tests {
         let key = Pubkey::default();
         let account0 = Account::new(1, 0, &key);
 
-        db.store(0, &[(&key, &account0)]);
+        let mut stats = PerfStats::default();
+        db.store(0, &[(&key, &account0)], &mut stats);
 
         let account1 = Account::new(0, 0, &key);
-        db.store(1, &[(&key, &account1)]);
+        db.store(1, &[(&key, &account1)], &mut stats);
         db.add_root(0);
 
         let ancestors = vec![(1, 1)].into_iter().collect();
@@ -793,7 +843,8 @@ mod tests {
         let account0 = Account::new(1, 0, &key);
 
         // store value 1 in the "root", i.e. db zero
-        db.store(0, &[(&key, &account0)]);
+        let mut stats = PerfStats::default();
+        db.store(0, &[(&key, &account0)], &mut stats);
 
         // now we have:
         //
@@ -806,7 +857,7 @@ mod tests {
 
         // store value 0 in one child
         let account1 = Account::new(0, 0, &key);
-        db.store(1, &[(&key, &account1)]);
+        db.store(1, &[(&key, &account1)], &mut stats);
 
         // masking accounts is done at the Accounts level, at accountsDB we see
         // original account (but could also accept "None", which is implemented
@@ -877,8 +928,9 @@ mod tests {
 
         let pubkey = Pubkey::new_rand();
         let account = Account::new(1, ACCOUNT_DATA_FILE_SIZE as usize / 3, &pubkey);
-        db.store(1, &[(&pubkey, &account)]);
-        db.store(1, &[(&pubkeys[0], &account)]);
+        let mut stats = PerfStats::default();
+        db.store(1, &[(&pubkey, &account)], &mut stats);
+        db.store(1, &[(&pubkeys[0], &account)], &mut stats);
         {
             let stores = db.storage.read().unwrap();
             let fork_0_stores = &stores.0.get(&0).unwrap();
@@ -908,11 +960,12 @@ mod tests {
         let paths = get_tmp_accounts_path!();
         let db0 = AccountsDB::new(&paths.paths);
         let account0 = Account::new(1, 0, &key);
-        db0.store(0, &[(&key, &account0)]);
+        let mut stats = PerfStats::default();
+        db0.store(0, &[(&key, &account0)], &mut stats);
 
         // 0 lamports in the child
         let account1 = Account::new(0, 0, &key);
-        db0.store(1, &[(&key, &account1)]);
+        db0.store(1, &[(&key, &account1)], &mut stats);
 
         // masking accounts is done at the Accounts level, at accountsDB we see
         // original account
@@ -930,13 +983,14 @@ mod tests {
         space: usize,
         num_vote: usize,
     ) {
+        let mut stats = PerfStats::default();
         for t in 0..num {
             let pubkey = Pubkey::new_rand();
             let account = Account::new((t + 1) as u64, space, &Account::default().owner);
             pubkeys.push(pubkey.clone());
             let ancestors = vec![(fork, 0)].into_iter().collect();
             assert!(accounts.load_slow(&ancestors, &pubkey).is_none());
-            accounts.store(fork, &[(&pubkey, &account)]);
+            accounts.store(fork, &[(&pubkey, &account)], &mut stats);
         }
         for t in 0..num_vote {
             let pubkey = Pubkey::new_rand();
@@ -944,7 +998,7 @@ mod tests {
             pubkeys.push(pubkey.clone());
             let ancestors = vec![(fork, 0)].into_iter().collect();
             assert!(accounts.load_slow(&ancestors, &pubkey).is_none());
-            accounts.store(fork, &[(&pubkey, &account)]);
+            accounts.store(fork, &[(&pubkey, &account)], &mut stats);
         }
     }
 
@@ -954,7 +1008,8 @@ mod tests {
             let ancestors = vec![(fork, 0)].into_iter().collect();
             if let Some((mut account, _)) = accounts.load_slow(&ancestors, &pubkeys[idx]) {
                 account.lamports = account.lamports + 1;
-                accounts.store(fork, &[(&pubkeys[idx], &account)]);
+                let mut stats = PerfStats::default();
+                accounts.store(fork, &[(&pubkeys[idx], &account)], &mut stats);
                 if account.lamports == 0 {
                     let ancestors = vec![(fork, 0)].into_iter().collect();
                     assert!(accounts.load_slow(&ancestors, &pubkeys[idx]).is_none());
@@ -999,7 +1054,7 @@ mod tests {
     ) {
         for idx in 0..num {
             let account = Account::new((idx + count) as u64, 0, &Account::default().owner);
-            accounts.store(fork, &[(&pubkeys[idx], &account)]);
+            accounts.store(fork, &[(&pubkeys[idx], &account)], &mut PerfStats::default());
         }
     }
 
@@ -1044,7 +1099,8 @@ mod tests {
         for i in 0..9 {
             let key = Pubkey::new_rand();
             let account = Account::new(i + 1, size as usize / 4, &key);
-            accounts.store(0, &[(&key, &account)]);
+            let mut stats = PerfStats::default();
+            accounts.store(0, &[(&key, &account)], &mut stats);
             keys.push(key);
         }
         for (i, key) in keys.iter().enumerate() {
@@ -1079,7 +1135,8 @@ mod tests {
         let status = [AccountStorageStatus::Available, AccountStorageStatus::Full];
         let pubkey1 = Pubkey::new_rand();
         let account1 = Account::new(1, ACCOUNT_DATA_FILE_SIZE as usize / 2, &pubkey1);
-        accounts.store(0, &[(&pubkey1, &account1)]);
+        let mut stats = PerfStats::default();
+        accounts.store(0, &[(&pubkey1, &account1)], &mut stats);
         {
             let stores = accounts.storage.read().unwrap();
             assert_eq!(stores.0.len(), 1);
@@ -1089,7 +1146,7 @@ mod tests {
 
         let pubkey2 = Pubkey::new_rand();
         let account2 = Account::new(1, ACCOUNT_DATA_FILE_SIZE as usize / 2, &pubkey2);
-        accounts.store(0, &[(&pubkey2, &account2)]);
+        accounts.store(0, &[(&pubkey2, &account2)], &mut stats);
         {
             let stores = accounts.storage.read().unwrap();
             assert_eq!(stores.0.len(), 1);
@@ -1109,10 +1166,11 @@ mod tests {
             account2
         );
 
+        let mut stats = PerfStats::default();
         // lots of stores, but 3 storages should be enough for everything
         for i in 0..25 {
             let index = i % 2;
-            accounts.store(0, &[(&pubkey1, &account1)]);
+            accounts.store(0, &[(&pubkey1, &account1)], &mut stats);
             {
                 let stores = accounts.storage.read().unwrap();
                 assert_eq!(stores.0.len(), 1);
@@ -1169,8 +1227,10 @@ mod tests {
         let accounts = AccountsDB::new(&paths.paths);
         let pubkey = Pubkey::new_rand();
         let account = Account::new(1, 0, &Account::default().owner);
+
+        let mut perf = PerfStats::default();
         //store an account
-        accounts.store(0, &[(&pubkey, &account)]);
+        accounts.store(0, &[(&pubkey, &account)], &mut perf);
         let ancestors = vec![(0, 0)].into_iter().collect();
         let info = accounts
             .accounts_index
@@ -1190,7 +1250,7 @@ mod tests {
             .is_some());
 
         //store causes cleanup
-        accounts.store(1, &[(&pubkey, &account)]);
+        accounts.store(1, &[(&pubkey, &account)], &mut perf);
 
         //fork is gone
         assert!(accounts.storage.read().unwrap().0.get(&0).is_none());
@@ -1255,7 +1315,7 @@ mod tests {
                         loop {
                             let account_bal = thread_rng().gen_range(1, 99);
                             account.lamports = account_bal;
-                            db.store(fork_id, &[(&pubkey, &account)]);
+                            db.store(fork_id, &[(&pubkey, &account)], &mut PerfStats::default());
                             let (account, fork) = db.load_slow(&HashMap::new(), &pubkey).expect(
                                 &format!("Could not fetch stored account {}, iter {}", pubkey, i),
                             );

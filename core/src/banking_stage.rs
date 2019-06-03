@@ -17,7 +17,7 @@ use bincode::deserialize;
 use itertools::Itertools;
 use solana_metrics::{inc_new_counter_debug, inc_new_counter_info, inc_new_counter_warn};
 use solana_runtime::accounts_db::ErrorCounters;
-use solana_runtime::bank::Bank;
+use solana_runtime::bank::{PerfStats, Bank};
 use solana_runtime::locked_accounts_results::LockedAccountsResults;
 use solana_sdk::poh_config::PohConfig;
 use solana_sdk::pubkey::Pubkey;
@@ -67,7 +67,8 @@ impl BankingStage {
             poh_recorder,
             verified_receiver,
             verified_vote_receiver,
-            4,
+            5, // 1 for voting, 1 for banking.
+               // More than 2 threads is slower in testnet testing.
         )
     }
 
@@ -146,6 +147,7 @@ impl BankingStage {
         my_pubkey: &Pubkey,
         poh_recorder: &Arc<Mutex<PohRecorder>>,
         buffered_packets: &mut Vec<PacketsAndOffsets>,
+        id: u32,
     ) -> Result<UnprocessedPackets> {
         let mut unprocessed_packets = vec![];
         let mut rebuffered_packets = 0;
@@ -169,6 +171,7 @@ impl BankingStage {
                     &poh_recorder,
                     &msgs,
                     unprocessed_indexes.to_owned(),
+                    id,
                 )?;
 
             new_tx_count += processed;
@@ -246,6 +249,7 @@ impl BankingStage {
         cluster_info: &Arc<RwLock<ClusterInfo>>,
         buffered_packets: &mut Vec<PacketsAndOffsets>,
         enable_forwarding: bool,
+        id: u32,
     ) -> Result<()> {
         let rcluster_info = cluster_info.read().unwrap();
 
@@ -269,6 +273,7 @@ impl BankingStage {
                     &rcluster_info.id(),
                     poh_recorder,
                     buffered_packets,
+                    id,
                 )?;
                 buffered_packets.append(&mut unprocessed);
                 Ok(())
@@ -315,6 +320,7 @@ impl BankingStage {
                     cluster_info,
                     &mut buffered_packets,
                     enable_forwarding,
+                    id,
                 )
                 .unwrap_or_else(|_| buffered_packets.clear());
             }
@@ -410,6 +416,7 @@ impl BankingStage {
         txs: &[Transaction],
         poh: &Arc<Mutex<PohRecorder>>,
         lock_results: &LockedAccountsResults<Transaction>,
+        id: u32,
     ) -> Result<()> {
         let now = Instant::now();
         // Use a shorter maximum age when adding transactions into the pipeline.  This will reduce
@@ -430,22 +437,25 @@ impl BankingStage {
             (now.elapsed(), record_locks)
         };
 
+        let mut stats = PerfStats::default();
         let commit_time = {
             let now = Instant::now();
-            bank.commit_transactions(txs, &loaded_accounts, &results);
+            bank.commit_transactions(txs, &loaded_accounts, &results, &mut stats);
             now.elapsed()
         };
 
         drop(record_locks);
         drop(freeze_lock);
 
-        debug!(
-            "bank: {} load_execute: {}us record: {}us commit: {}us txs_len: {}",
+        info!(
+            "bank: {} load_execute: {}us record: {}us commit: {}us txs_len: {} id: {} stats: {:?}",
             bank.slot(),
             duration_as_us(&load_execute_time),
             duration_as_us(&record_time),
             duration_as_us(&commit_time),
             txs.len(),
+            id,
+            stats,
         );
 
         Ok(())
@@ -456,6 +466,7 @@ impl BankingStage {
         txs: &[Transaction],
         poh: &Arc<Mutex<PohRecorder>>,
         chunk_offset: usize,
+        id: u32,
     ) -> (Result<()>, Vec<usize>) {
         let now = Instant::now();
         // Once accounts are locked, other threads cannot encode transactions that will modify the
@@ -474,7 +485,7 @@ impl BankingStage {
             })
             .collect();
 
-        let results = Self::process_and_record_transactions_locked(bank, txs, poh, &lock_results);
+        let results = Self::process_and_record_transactions_locked(bank, txs, poh, &lock_results, id);
 
         let now = Instant::now();
         // Once the accounts are new transactions can enter the pipeline to process them
@@ -500,6 +511,7 @@ impl BankingStage {
         bank: &Bank,
         transactions: &[Transaction],
         poh: &Arc<Mutex<PohRecorder>>,
+        id: u32,
     ) -> Result<(usize, Vec<usize>)> {
         let mut chunk_start = 0;
         let mut unprocessed_txs = vec![];
@@ -516,6 +528,7 @@ impl BankingStage {
                 &transactions[chunk_start..chunk_end],
                 poh,
                 chunk_start,
+                id,
             );
             trace!("process_transactions: {:?}", result);
             unprocessed_txs.extend_from_slice(&unprocessed_txs_in_chunk);
@@ -624,6 +637,7 @@ impl BankingStage {
         poh: &Arc<Mutex<PohRecorder>>,
         msgs: &Packets,
         transaction_indexes: Vec<usize>,
+        id: u32,
     ) -> Result<(usize, usize, Vec<usize>)> {
         let (transactions, transaction_indexes) =
             Self::transactions_from_packets(msgs, &transaction_indexes);
@@ -636,7 +650,7 @@ impl BankingStage {
         let tx_len = transactions.len();
 
         let (processed, unprocessed_tx_indexes) =
-            Self::process_transactions(bank, &transactions, poh)?;
+            Self::process_transactions(bank, &transactions, poh, id)?;
 
         let unprocessed_tx_count = unprocessed_tx_indexes.len();
 
@@ -737,7 +751,7 @@ impl BankingStage {
             let bank = bank.unwrap();
 
             let (processed, verified_txs_len, unprocessed_indexes) =
-                Self::process_received_packets(&bank, &poh, &msgs, packet_indexes)?;
+                Self::process_received_packets(&bank, &poh, &msgs, packet_indexes, id)?;
 
             new_tx_count += processed;
 
@@ -1489,7 +1503,7 @@ mod tests {
 
             poh_recorder.lock().unwrap().set_working_bank(working_bank);
 
-            BankingStage::process_and_record_transactions(&bank, &transactions, &poh_recorder, 0)
+            BankingStage::process_and_record_transactions(&bank, &transactions, &poh_recorder, 0, 0)
                 .0
                 .unwrap();
             poh_recorder.lock().unwrap().tick();
@@ -1525,7 +1539,8 @@ mod tests {
                     &bank,
                     &transactions,
                     &poh_recorder,
-                    0
+                    0,
+                    0,
                 )
                 .0,
                 Err(Error::PohRecorderError(PohRecorderError::MaxHeightReached))
@@ -1581,6 +1596,7 @@ mod tests {
                 &bank,
                 &transactions,
                 &poh_recorder,
+                0,
                 0,
             );
 

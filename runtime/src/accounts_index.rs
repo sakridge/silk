@@ -2,6 +2,7 @@ use log::*;
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 use std::collections::{HashMap, HashSet};
+use rand::{Rng, thread_rng};
 
 pub type Fork = u64;
 
@@ -46,6 +47,10 @@ impl<T: Clone> AccountsIndex<T> {
         // filter out old entries
         rv.extend(fork_vec.iter().filter(|(f, _)| *f == fork).cloned());
         fork_vec.retain(|(f, _)| *f != fork);
+        let sample = thread_rng().gen_range(0, 500);
+        if sample == 0 {
+            info!("rv.len: {} fork_vec.len: {}", rv.len(), fork_vec.len());
+        }
 
         // add the new entry
         fork_vec.push((fork, account_info));

@@ -42,3 +42,6 @@ members = [
     "wallet",
 ]
 exclude = ["programs/bpf/rust/noop"]
+
+#[profile.release]
+#opt-level = "s"

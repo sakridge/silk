@@ -33,7 +33,7 @@ use solana_sdk::syscall::fees::{self, Fees};
 use solana_sdk::syscall::slot_hashes::{self, SlotHashes};
 use solana_sdk::syscall::tick_height::{self, TickHeight};
 use solana_sdk::system_transaction;
-use solana_sdk::timing::{duration_as_ms, duration_as_us, MAX_RECENT_BLOCKHASHES};
+use solana_sdk::timing::{duration_as_ns, duration_as_ms, duration_as_us, MAX_RECENT_BLOCKHASHES};
 use solana_sdk::transaction::{Result, Transaction, TransactionError};
 use std::borrow::Borrow;
 use std::cmp;
@@ -46,6 +46,24 @@ use std::time::Instant;
 
 type BankStatusCache = StatusCache<Result<()>>;
 
+#[derive(Default, Debug)]
+pub struct PerfStats {
+    pub append: u64,
+    pub all_store: u64,
+    pub purge_total: u64,
+    pub remove_dead_forks: u64,
+    pub cleanup_dead_forks: u64,
+    pub cleanup_dead_forks_work: u64,
+    pub store_accounts: u64,
+    pub update_index: u64,
+    pub get_fork: u64,
+    pub infos: u64,
+    pub metas: u64,
+    pub new_stores: u64,
+    pub fork_search: u64,
+}
+
+/// Manager for the state of all accounts and programs after processing its entries.
 #[derive(Default)]
 pub struct BankRc {
     /// where all the Accounts are stored
@@ -934,6 +952,7 @@ impl Bank {
         txs: &[Transaction],
         loaded_accounts: &[Result<(InstructionAccounts, InstructionLoaders)>],
         executed: &[Result<()>],
+        stats: &mut PerfStats,
     ) -> Vec<Result<()>> {
         if self.is_frozen() {
             warn!("=========== FIXME: commit_transactions() working on a frozen bank! ================");
@@ -948,7 +967,7 @@ impl Bank {
         let now = Instant::now();
         self.rc
             .accounts
-            .store_accounts(self.slot(), txs, executed, loaded_accounts);
+            .store_accounts(self.slot(), txs, executed, loaded_accounts, stats);
 
         self.update_cached_accounts(txs, executed, loaded_accounts);
 
@@ -959,6 +978,8 @@ impl Bank {
             duration_as_us(&write_elapsed),
             txs.len(),
         );
+        stats.all_store += duration_as_ns(&write_elapsed);
+
         self.update_transaction_statuses(txs, &executed);
         self.filter_program_errors_and_collect_fee(txs, executed)
     }
@@ -974,7 +995,8 @@ impl Bank {
         let (loaded_accounts, executed) =
             self.load_and_execute_transactions(txs, lock_results, max_age);
 
-        self.commit_transactions(txs, &loaded_accounts, &executed)
+        let mut stats = PerfStats::default();
+        self.commit_transactions(txs, &loaded_accounts, &executed, &mut stats)
     }
 
     #[must_use]
