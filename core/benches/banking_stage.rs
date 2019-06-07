@@ -16,7 +16,7 @@ use solana::packet::to_packets_chunked;
 use solana::poh_recorder::WorkingBankEntries;
 use solana::service::Service;
 use solana::test_tx::test_tx;
-use solana_runtime::bank::Bank;
+use solana_runtime::bank::{PerfStats, Bank};
 use solana_sdk::hash::hash;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Signature;
@@ -79,7 +79,7 @@ fn bench_consume_buffered(bencher: &mut Bencher) {
         // If the packet buffers are copied, performance will be poor.
         bencher.iter(move || {
             let _ignored =
-                BankingStage::consume_buffered_packets(&my_pubkey, &poh_recorder, &mut packets);
+                BankingStage::consume_buffered_packets(&my_pubkey, &poh_recorder, &mut packets, 0);
         });
 
         exit.store(true, Ordering::Relaxed);
