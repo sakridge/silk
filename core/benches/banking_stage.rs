@@ -33,16 +33,18 @@ use test::Bencher;
 
 fn check_txs(receiver: &Arc<Receiver<WorkingBankEntries>>, ref_tx_count: usize) {
     let mut total = 0;
+    let now = Instant::now();
     loop {
         let entries = receiver.recv_timeout(Duration::new(1, 0));
         if let Ok((_, entries)) = entries {
             for (entry, _) in &entries {
                 total += entry.transactions.len();
             }
-        } else {
-            break;
         }
         if total >= ref_tx_count {
+            break;
+        }
+        if now.elapsed().as_secs() > 60 {
             break;
         }
     }
@@ -85,7 +87,6 @@ fn bench_consume_buffered(bencher: &mut Bencher) {
 }
 
 #[bench]
-#[ignore]
 fn bench_banking_stage_multi_accounts(bencher: &mut Bencher) {
     solana_logger::setup();
     let num_threads = BankingStage::num_threads() as usize;
