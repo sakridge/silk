@@ -381,7 +381,7 @@ impl BankingStage {
         results: &[transaction::Result<()>],
         poh: &Arc<Mutex<PohRecorder>>,
         recordable_txs: &'b mut Vec<&'b Transaction>,
-    ) -> Result<LockedAccountsResults<'a, 'b, &'b Transaction>> {
+    ) -> Result<(LockedAccountsResults<'a, 'b, &'b Transaction>, usize)> {
         let processed_transactions: Vec<_> = results
             .iter()
             .zip(txs.iter())
@@ -396,6 +396,7 @@ impl BankingStage {
             .collect();
         let record_locks = bank.lock_record_accounts(recordable_txs);
         debug!("processed: {} ", processed_transactions.len());
+        let num_processed = processed_transactions.len();
         // unlock all the accounts with errors which are filtered by the above `filter_map`
         if !processed_transactions.is_empty() {
             inc_new_counter_warn!(
@@ -408,7 +409,7 @@ impl BankingStage {
                 .unwrap()
                 .record(bank.slot(), hash, processed_transactions)?;
         }
-        Ok(record_locks)
+        Ok((record_locks, num_processed))
     }
 
     fn process_and_record_transactions_locked(
@@ -430,11 +431,11 @@ impl BankingStage {
         let freeze_lock = bank.freeze_lock();
 
         let mut recordable_txs = vec![];
-        let (record_time, record_locks) = {
+        let (record_time, record_locks, num_recorded) = {
             let now = Instant::now();
-            let record_locks =
+            let (record_locks, num_recorded) =
                 Self::record_transactions(bank, txs, &results, poh, &mut recordable_txs)?;
-            (now.elapsed(), record_locks)
+            (now.elapsed(), record_locks, num_recorded)
         };
 
         let mut stats = PerfStats::default();
@@ -448,7 +449,7 @@ impl BankingStage {
         drop(freeze_lock);
 
         info!(
-            "bank: {} load_execute: {}us record: {}us commit: {}us txs_len: {} id: {} stats: {:?}",
+            "bank: {} load_execute: {}us record: {}us commit: {}us txs_len: {} id: {} stats: {:?} recordable: {}",
             bank.slot(),
             duration_as_us(&load_execute_time),
             duration_as_us(&record_time),
@@ -456,6 +457,7 @@ impl BankingStage {
             txs.len(),
             id,
             stats,
+            num_recorded,
         );
 
         Ok(())
