@@ -200,6 +200,10 @@ pub struct Bank {
     #[serde(deserialize_with = "deserialize_atomicusize")]
     transaction_count: AtomicUsize, // TODO: Use AtomicU64 if/when available
 
+    #[serde(serialize_with = "serialize_atomicusize")]
+    #[serde(deserialize_with = "deserialize_atomicusize")]
+    error_count: AtomicUsize, // TODO: Use AtomicU64 if/when available
+
     /// Bank tick height
     #[serde(serialize_with = "serialize_atomicusize")]
     #[serde(deserialize_with = "deserialize_atomicusize")]
@@ -865,13 +869,13 @@ impl Bank {
                 tx_count += 1;
             } else {
                 if err_count == 0 {
-                    debug!("tx error: {:?} {:?}", r, tx);
+                    info!("tx error: {:?} {:?}", r, tx);
                 }
                 err_count += 1;
             }
         }
         if err_count > 0 {
-            debug!("{} errors of {} txs", err_count, err_count + tx_count);
+            info!("{} errors of {} txs", err_count, err_count + tx_count);
             inc_new_counter_error!(
                 "bank-process_transactions-account_not_found",
                 error_counters.account_not_found,
@@ -882,6 +886,8 @@ impl Bank {
         }
 
         self.increment_transaction_count(tx_count);
+
+        self.increment_error_count(err_count);
 
         inc_new_counter_info!("bank-process_transactions-txs", tx_count, 0, 1000);
         Self::update_error_counters(&error_counters);
@@ -1081,6 +1087,12 @@ impl Bank {
     fn increment_transaction_count(&self, tx_count: usize) {
         self.transaction_count
             .fetch_add(tx_count, Ordering::Relaxed);
+    }
+    pub fn error_count(&self) -> u64 {
+        self.error_count.load(Ordering::Relaxed) as u64
+    }
+    fn increment_error_count(&self, err_count: usize) {
+        self.error_count.fetch_add(err_count, Ordering::Relaxed);
     }
 
     pub fn get_signature_confirmation_status(

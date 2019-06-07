@@ -20,6 +20,7 @@ use solana_runtime::bank::Bank;
 use solana_sdk::hash::hash;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Signature;
+use solana_sdk::signature::{Keypair, KeypairUtil};
 use solana_sdk::system_transaction;
 use solana_sdk::timing::{
     duration_as_ms, timestamp, DEFAULT_TICKS_PER_SLOT, MAX_RECENT_BLOCKHASHES,
@@ -31,7 +32,7 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 use test::Bencher;
 
-fn check_txs(receiver: &Arc<Receiver<WorkingBankEntries>>, ref_tx_count: usize) {
+fn check_txs(receiver: &Arc<Receiver<WorkingBankEntries>>, ref_tx_count: usize, bank: &Bank) {
     let mut total = 0;
     let now = Instant::now();
     loop {
@@ -48,6 +49,7 @@ fn check_txs(receiver: &Arc<Receiver<WorkingBankEntries>>, ref_tx_count: usize) 
             break;
         }
     }
+    assert_eq!(bank.error_count(), 1);
     assert_eq!(total, ref_tx_count);
 }
 
@@ -107,8 +109,15 @@ fn bench_banking_stage_multi_accounts(bencher: &mut Bencher) {
     let (vote_sender, vote_receiver) = channel();
     let bank = Arc::new(Bank::new(&genesis_block));
     let to_pubkey = Pubkey::new_rand();
+
+    let empty_key = Keypair::new();
+    let mut error = system_transaction::transfer(&empty_key, &to_pubkey, 1, genesis_block.hash());
+    error.message.account_keys[0] = to_pubkey;
+    assert!(bank.process_transaction(&error).is_err());
+    assert_eq!(bank.error_count(), 1);
+
     let dummy = system_transaction::transfer(&mint_keypair, &to_pubkey, 1, genesis_block.hash());
-    trace!("txs: {}", txes);
+    println!("txs: {}", txes);
     let transactions: Vec<_> = (0..txes)
         .into_par_iter()
         .map(|_| {
@@ -183,7 +192,7 @@ fn bench_banking_stage_multi_accounts(bencher: &mut Bencher) {
                 trace!("sending... {}..{} {}", start, start + half_len, timestamp());
                 verified_sender.send(v.to_vec()).unwrap();
             }
-            check_txs(&signal_receiver2, txes / 2);
+            check_txs(&signal_receiver2, txes / 2, &bank);
             trace!(
                 "time: {} checked: {}",
                 duration_as_ms(&now.elapsed()),
@@ -311,7 +320,7 @@ fn bench_banking_stage_multi_programs(bencher: &mut Bencher) {
             for v in verified[start..start + half_len].chunks(verified.len() / num_threads) {
                 verified_sender.send(v.to_vec()).unwrap();
             }
-            check_txs(&signal_receiver2, txes / 2);
+            check_txs(&signal_receiver2, txes / 2, &bank);
             bank.clear_signatures();
             start += half_len;
             start %= verified.len();

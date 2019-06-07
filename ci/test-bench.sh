@@ -55,8 +55,8 @@ _ cargo +$rust_nightly bench --manifest-path runtime/Cargo.toml ${V:+--verbose} 
   -- -Z unstable-options --format=json | tee -a "$BENCH_FILE"
 
 # Run core benches
-_ cargo +$rust_nightly bench --manifest-path core/Cargo.toml ${V:+--verbose} \
-  -- -Z unstable-options --format=json | tee -a "$BENCH_FILE"
+RUST_LOG=solana=info _ cargo +$rust_nightly bench --manifest-path core/Cargo.toml ${V:+--verbose} \
+  -- -Z unstable-options --format=json --nocapture | tee -a "$BENCH_FILE"
 
 # Run bpf benches
 _ cargo +$rust_nightly bench --manifest-path programs/bpf/Cargo.toml ${V:+--verbose} --features=bpf_c \
