@@ -47,7 +47,7 @@ impl Default for ValidatorConfig {
         // so tests don't take forever to run.
         const NUM_HASHES_FOR_STORAGE_ROTATE: u64 = SLOTS_PER_SEGMENT;
         Self {
-            sigverify_disabled: false,
+            sigverify_disabled: true,
             voting_disabled: false,
             blockstream: None,
             storage_rotate_count: NUM_HASHES_FOR_STORAGE_ROTATE,
