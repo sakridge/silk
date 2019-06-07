@@ -54,6 +54,7 @@ pub struct PerfStats {
     pub remove_dead_forks: u64,
     pub cleanup_dead_forks: u64,
     pub cleanup_dead_forks_work: u64,
+    pub update_index_work: u64,
     pub store_accounts: u64,
     pub update_index: u64,
     pub get_fork: u64,
@@ -890,13 +891,13 @@ impl Bank {
                 tx_count += 1;
             } else {
                 if err_count == 0 {
-                    info!("tx error: {:?} {:?}", r, tx);
+                    debug!("tx error: {:?} {:?}", r, tx);
                 }
                 err_count += 1;
             }
         }
         if err_count > 0 {
-            info!("{} errors of {} txs", err_count, err_count + tx_count);
+            debug!("{} errors of {} txs", err_count, err_count + tx_count);
             inc_new_counter_error!(
                 "bank-process_transactions-account_not_found",
                 error_counters.account_not_found,
