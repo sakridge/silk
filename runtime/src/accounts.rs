@@ -2,9 +2,9 @@ use crate::accounts_db::{
     get_paths_vec, AccountInfo, AccountStorage, AccountsDB, AppendVecId, ErrorCounters,
     InstructionAccounts, InstructionLoaders,
 };
-use crate::bank::PerfStats;
 use crate::accounts_index::{AccountsIndex, Fork};
 use crate::append_vec::StoredAccount;
+use crate::bank::PerfStats;
 use crate::message_processor::has_duplicates;
 use bincode::serialize;
 use log::*;
@@ -359,7 +359,8 @@ impl Accounts {
     /// Slow because lock is held for 1 operation instead of many
     pub fn store_slow(&self, fork: Fork, pubkey: &Pubkey, account: &Account) {
         let mut stats = PerfStats::default();
-        self.accounts_db.store(fork, &[(pubkey, account)], &mut stats);
+        self.accounts_db
+            .store(fork, &[(pubkey, account)], &mut stats);
     }
 
     fn lock_account(

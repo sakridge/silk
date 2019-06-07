@@ -1,8 +1,11 @@
+use crate::bank::PerfStats;
 use log::*;
+use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
+use solana_sdk::timing::duration_as_ns;
 use std::collections::{HashMap, HashSet};
-use rand::{Rng, thread_rng};
+use std::time::Instant;
 
 pub type Fork = u64;
 
@@ -36,8 +39,15 @@ impl<T: Clone> AccountsIndex<T> {
 
     /// Insert a new fork.
     /// @retval - The return value contains any squashed accounts that can freed from storage.
-    pub fn insert(&mut self, fork: Fork, pubkey: &Pubkey, account_info: T) -> Vec<(Fork, T)> {
+    pub fn insert(
+        &mut self,
+        fork: Fork,
+        pubkey: &Pubkey,
+        account_info: T,
+        stats: &mut PerfStats,
+    ) -> Vec<(Fork, T)> {
         let mut rv = vec![];
+        let now = Instant::now();
         let mut fork_vec: Vec<(Fork, T)> = vec![];
         {
             let entry = self.account_maps.entry(*pubkey).or_insert_with(|| vec![]);
@@ -51,6 +61,8 @@ impl<T: Clone> AccountsIndex<T> {
         if sample == 0 {
             info!("rv.len: {} fork_vec.len: {}", rv.len(), fork_vec.len());
         }
+        stats.insert1 += duration_as_ns(&now.elapsed());
+        let now = Instant::now();
 
         // add the new entry
         fork_vec.push((fork, account_info));
@@ -61,11 +73,18 @@ impl<T: Clone> AccountsIndex<T> {
                 .filter(|(fork, _)| self.is_purged(*fork))
                 .cloned(),
         );
+
+        stats.insert2 += duration_as_ns(&now.elapsed());
+        let now = Instant::now();
+
         fork_vec.retain(|(fork, _)| !self.is_purged(*fork));
         {
             let entry = self.account_maps.entry(*pubkey).or_insert_with(|| vec![]);
             std::mem::swap(entry, &mut fork_vec);
         };
+
+        stats.insert3 += duration_as_ns(&now.elapsed());
+
         rv
     }
 

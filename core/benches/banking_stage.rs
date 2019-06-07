@@ -16,7 +16,7 @@ use solana::packet::to_packets_chunked;
 use solana::poh_recorder::WorkingBankEntries;
 use solana::service::Service;
 use solana::test_tx::test_tx;
-use solana_runtime::bank::{PerfStats, Bank};
+use solana_runtime::bank::{Bank, PerfStats};
 use solana_sdk::hash::hash;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Signature;

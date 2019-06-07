@@ -2,19 +2,22 @@
 
 extern crate test;
 
-use rand::{Rng, thread_rng};
-use solana_sdk::pubkey::Pubkey;
 use log::*;
-use solana_runtime::accounts_index::AccountsIndex;
+use rand::{thread_rng, Rng};
 use solana_runtime::accounts_db::AccountInfo;
-use test::Bencher;
+use solana_runtime::accounts_index::AccountsIndex;
 use solana_runtime::bank::PerfStats;
+use solana_sdk::pubkey::Pubkey;
+use test::Bencher;
 
 #[bench]
 fn bench_accounts_index(bencher: &mut Bencher) {
     solana_logger::setup();
     const NUM_PUBKEYS: usize = 2;
-    let pubkeys: Vec<_> = (0..NUM_PUBKEYS).into_iter().map(|_| Pubkey::new_rand()).collect();
+    let pubkeys: Vec<_> = (0..NUM_PUBKEYS)
+        .into_iter()
+        .map(|_| Pubkey::new_rand())
+        .collect();
 
     const NUM_FORKS: u64 = 32;
     bencher.iter(|| {

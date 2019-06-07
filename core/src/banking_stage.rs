@@ -17,7 +17,7 @@ use bincode::deserialize;
 use itertools::Itertools;
 use solana_metrics::{inc_new_counter_debug, inc_new_counter_info, inc_new_counter_warn};
 use solana_runtime::accounts_db::ErrorCounters;
-use solana_runtime::bank::{PerfStats, Bank};
+use solana_runtime::bank::{Bank, PerfStats};
 use solana_runtime::locked_accounts_results::LockedAccountsResults;
 use solana_sdk::poh_config::PohConfig;
 use solana_sdk::pubkey::Pubkey;
@@ -485,7 +485,8 @@ impl BankingStage {
             })
             .collect();
 
-        let results = Self::process_and_record_transactions_locked(bank, txs, poh, &lock_results, id);
+        let results =
+            Self::process_and_record_transactions_locked(bank, txs, poh, &lock_results, id);
 
         let now = Instant::now();
         // Once the accounts are new transactions can enter the pipeline to process them
@@ -1503,9 +1504,15 @@ mod tests {
 
             poh_recorder.lock().unwrap().set_working_bank(working_bank);
 
-            BankingStage::process_and_record_transactions(&bank, &transactions, &poh_recorder, 0, 0)
-                .0
-                .unwrap();
+            BankingStage::process_and_record_transactions(
+                &bank,
+                &transactions,
+                &poh_recorder,
+                0,
+                0,
+            )
+            .0
+            .unwrap();
             poh_recorder.lock().unwrap().tick();
 
             let mut done = false;

@@ -33,7 +33,7 @@ use solana_sdk::syscall::fees::{self, Fees};
 use solana_sdk::syscall::slot_hashes::{self, SlotHashes};
 use solana_sdk::syscall::tick_height::{self, TickHeight};
 use solana_sdk::system_transaction;
-use solana_sdk::timing::{duration_as_ns, duration_as_ms, duration_as_us, MAX_RECENT_BLOCKHASHES};
+use solana_sdk::timing::{duration_as_ms, duration_as_ns, duration_as_us, MAX_RECENT_BLOCKHASHES};
 use solana_sdk::transaction::{Result, Transaction, TransactionError};
 use std::borrow::Borrow;
 use std::cmp;
@@ -61,6 +61,9 @@ pub struct PerfStats {
     pub metas: u64,
     pub new_stores: u64,
     pub fork_search: u64,
+    pub insert1: u64,
+    pub insert2: u64,
+    pub insert3: u64,
 }
 
 /// Manager for the state of all accounts and programs after processing its entries.
