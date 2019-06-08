@@ -65,6 +65,14 @@ pub struct PerfStats {
     pub insert1: u64,
     pub insert2: u64,
     pub insert3: u64,
+    pub contains: u64,
+    pub no_contains: u64,
+    pub purge: u64,
+    pub cleanup_dead_forks_count: u64,
+    pub cleaned_up_forks_count: u64,
+    pub rv_gt_0: u64,
+    pub rv_gt_1: u64,
+    pub insert_count: u64,
 }
 
 /// Manager for the state of all accounts and programs after processing its entries.

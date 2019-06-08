@@ -37,3 +37,8 @@ sys-info = "0.5.7"
 [lib]
 crate-type = ["lib"]
 name = "solana_runtime"
+
+[features]
+hashmap = []
+hashset = []
+vec = []
