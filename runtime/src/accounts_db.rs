@@ -516,7 +516,7 @@ impl AccountsDB {
         infos: Vec<AccountInfo>,
         accounts: &[(&Pubkey, &Account)],
         stats: &mut PerfStats,
-    ) -> Vec<(Fork, AccountInfo)> {
+    ) -> (Vec<(Fork, AccountInfo)>, u64) {
         let mut reclaims = Vec::with_capacity(infos.len());
         let mut index = self.accounts_index.write().unwrap();
         let now = Instant::now();
@@ -525,7 +525,7 @@ impl AccountsDB {
             reclaims.extend(index.insert(fork_id, key, info, stats).into_iter())
         }
         stats.update_index_work += duration_as_ns(&now.elapsed());
-        reclaims
+        (reclaims, index.last_root)
     }
 
     fn remove_dead_accounts(&self, reclaims: Vec<(Fork, AccountInfo)>) -> HashSet<Fork> {
@@ -560,13 +560,21 @@ impl AccountsDB {
         dead_forks
     }
 
-    fn cleanup_dead_forks(&self, dead_forks: &mut HashSet<Fork>, stats: &mut PerfStats) {
-        let mut index = self.accounts_index.write().unwrap();
+    fn cleanup_dead_forks(&self, dead_forks: &mut HashSet<Fork>, last_root: u64, stats: &mut PerfStats) {
+        stats.cleanup_dead_forks_count += 1;
         let now = Instant::now();
+        let mut cleanup = false;
         // a fork is not totally dead until it is older than the root
-        dead_forks.retain(|fork| *fork < index.last_root);
-        for fork in dead_forks.iter() {
-            index.cleanup_dead_fork(*fork);
+        dead_forks.retain(|fork| *fork < last_root);
+        if !dead_forks.is_empty() {
+            let mut index = self.accounts_index.write().unwrap();
+            for fork in dead_forks.iter() {
+                cleanup = true;
+                index.cleanup_dead_fork(*fork);
+            }
+            if cleanup {
+                stats.cleaned_up_forks_count += 1;
+            }
         }
         stats.cleanup_dead_forks_work += duration_as_ns(&now.elapsed());
     }
@@ -577,7 +585,7 @@ impl AccountsDB {
         let infos = self.store_accounts(fork_id, accounts, stats);
         stats.store_accounts += duration_as_ns(&now.elapsed());
         let now = Instant::now();
-        let reclaims = self.update_index(fork_id, infos, accounts, stats);
+        let (reclaims, last_root) = self.update_index(fork_id, infos, accounts, stats);
         stats.update_index += duration_as_ns(&now.elapsed());
 
         trace!("reclaim: {}", reclaims.len());
@@ -586,7 +594,7 @@ impl AccountsDB {
         stats.remove_dead_forks += duration_as_ns(&now.elapsed());
         trace!("dead_forks: {}", dead_forks.len());
         let now = Instant::now();
-        self.cleanup_dead_forks(&mut dead_forks, stats);
+        self.cleanup_dead_forks(&mut dead_forks, last_root, stats);
         stats.cleanup_dead_forks += duration_as_ns(&now.elapsed());
         trace!("purge_forks: {}", dead_forks.len());
         let now = Instant::now();
