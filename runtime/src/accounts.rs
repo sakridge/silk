@@ -2,6 +2,7 @@ use crate::accounts_db::{
     get_paths_vec, AccountInfo, AccountStorage, AccountsDB, AppendVecId, ErrorCounters,
     InstructionAccounts, InstructionLoaders,
 };
+use solana_sdk::timing::duration_as_ns;
 use crate::accounts_index::{AccountsIndex, Fork};
 use crate::append_vec::StoredAccount;
 use crate::bank::PerfStats;
@@ -30,7 +31,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::sleep;
-use std::time::Duration;
+use std::time::{Instant, Duration};
 
 const ACCOUNTSDB_DIR: &str = "accountsdb";
 const NUM_ACCOUNT_DIRS: usize = 4;
@@ -171,7 +172,9 @@ impl Accounts {
         tx: &Transaction,
         fee: u64,
         error_counters: &mut ErrorCounters,
+        stats: &mut PerfStats,
     ) -> Result<Vec<Account>> {
+        let now = Instant::now();
         // Copy all the accounts
         let message = tx.message();
         if tx.signatures.is_empty() && fee != 0 {
@@ -183,19 +186,26 @@ impl Accounts {
                 return Err(TransactionError::AccountLoadedTwice);
             }
 
+            stats.load_tx1 += duration_as_ns(&now.elapsed());
+            let now = Instant::now();
             // There is no way to predict what program will execute without an error
             // If a fee can pay for execution then the program will be scheduled
             let mut called_accounts: Vec<Account> = vec![];
             for key in &message.account_keys {
                 if !message.program_ids().contains(&key) {
+
+                    let db_load = Instant::now();
                     called_accounts.push(
                         AccountsDB::load(storage, ancestors, accounts_index, key)
                             .map(|(account, _)| account)
                             .unwrap_or_default(),
                     );
+                    stats.load_tx4 += duration_as_ns(&db_load.elapsed());
                 }
             }
-            if called_accounts.is_empty() || called_accounts[0].lamports == 0 {
+            stats.load_tx2 += duration_as_ns(&now.elapsed());
+            let now = Instant::now();
+            let ret = if called_accounts.is_empty() || called_accounts[0].lamports == 0 {
                 error_counters.account_not_found += 1;
                 Err(TransactionError::AccountNotFound)
             } else if called_accounts[0].owner != system_program::id() {
@@ -207,7 +217,9 @@ impl Accounts {
             } else {
                 called_accounts[0].lamports -= fee;
                 Ok(called_accounts)
-            }
+            };
+            stats.load_tx3 += duration_as_ns(&now.elapsed());
+            ret
         }
     }
 
@@ -290,6 +302,7 @@ impl Accounts {
         lock_results: Vec<Result<()>>,
         fee_calculator: &FeeCalculator,
         error_counters: &mut ErrorCounters,
+        stats: &mut PerfStats,
     ) -> Vec<Result<(InstructionAccounts, InstructionLoaders)>> {
         //PERF: hold the lock to scan for the references, but not to clone the accounts
         //TODO: two locks usually leads to deadlocks, should this be one structure?
@@ -300,6 +313,7 @@ impl Accounts {
             .map(|etx| match etx {
                 (tx, Ok(())) => {
                     let fee = fee_calculator.calculate_fee(tx.message());
+                    let now = Instant::now();
                     let accounts = Self::load_tx_accounts(
                         &storage,
                         ancestors,
@@ -307,7 +321,10 @@ impl Accounts {
                         tx,
                         fee,
                         error_counters,
+                        stats,
                     )?;
+                    stats.load_tx_accounts += duration_as_ns(&now.elapsed());
+                    let now = Instant::now();
                     let loaders = Self::load_loaders(
                         &storage,
                         ancestors,
@@ -315,6 +332,7 @@ impl Accounts {
                         tx,
                         error_counters,
                     )?;
+                    stats.load_loaders += duration_as_ns(&now.elapsed());
                     Ok((accounts, loaders))
                 }
                 (_, Err(e)) => Err(e),
@@ -620,6 +638,7 @@ mod tests {
             vec![Ok(())],
             &fee_calculator,
             error_counters,
+            &mut PerfStats::default(),
         );
         res
     }

@@ -62,17 +62,26 @@ pub struct PerfStats {
     pub metas: u64,
     pub new_stores: u64,
     pub fork_search: u64,
-    pub insert1: u64,
+    /*pub insert1: u64,
     pub insert2: u64,
     pub insert3: u64,
     pub contains: u64,
-    pub no_contains: u64,
+    pub no_contains: u64,*/
     pub purge: u64,
     pub cleanup_dead_forks_count: u64,
     pub cleaned_up_forks_count: u64,
     pub rv_gt_0: u64,
     pub rv_gt_1: u64,
     pub insert_count: u64,
+    pub total_load: u64,
+    pub total_execution: u64,
+    pub load_tx_accounts: u64,
+    pub load_loaders: u64,
+    pub load_tx1: u64,
+    pub load_tx2: u64,
+    pub load_tx3: u64,
+    pub load_tx4: u64,
+    pub extra: u64,
 }
 
 /// Manager for the state of all accounts and programs after processing its entries.
@@ -698,6 +707,7 @@ impl Bank {
         txs: &[Transaction],
         results: Vec<Result<()>>,
         error_counters: &mut ErrorCounters,
+        stats: &mut PerfStats,
     ) -> Vec<Result<(InstructionAccounts, InstructionLoaders)>> {
         self.rc.accounts.load_accounts(
             &self.ancestors,
@@ -705,6 +715,7 @@ impl Bank {
             results,
             &self.fee_calculator,
             error_counters,
+            stats,
         )
     }
     fn check_refs(
@@ -855,6 +866,7 @@ impl Bank {
         txs: &[Transaction],
         lock_results: &LockedAccountsResults<Transaction>,
         max_age: usize,
+        stats: &mut PerfStats,
     ) -> (
         Vec<Result<(InstructionAccounts, InstructionLoaders)>>,
         Vec<Result<()>>,
@@ -868,7 +880,7 @@ impl Bank {
             max_age,
             &mut error_counters,
         );
-        let mut loaded_accounts = self.load_accounts(txs, sig_results, &mut error_counters);
+        let mut loaded_accounts = self.load_accounts(txs, sig_results, &mut error_counters, stats);
 
         let load_elapsed = now.elapsed();
         let now = Instant::now();
@@ -886,6 +898,8 @@ impl Bank {
 
         let execution_elapsed = now.elapsed();
 
+        stats.total_load += duration_as_ns(&load_elapsed);
+        stats.total_execution += duration_as_ns(&execution_elapsed);
         debug!(
             "load: {}us execute: {}us txs_len={}",
             duration_as_us(&load_elapsed),
@@ -1004,10 +1018,10 @@ impl Bank {
         lock_results: &LockedAccountsResults<Transaction>,
         max_age: usize,
     ) -> Vec<Result<()>> {
-        let (loaded_accounts, executed) =
-            self.load_and_execute_transactions(txs, lock_results, max_age);
-
         let mut stats = PerfStats::default();
+        let (loaded_accounts, executed) =
+            self.load_and_execute_transactions(txs, lock_results, max_age, &mut stats);
+
         self.commit_transactions(txs, &loaded_accounts, &executed, &mut stats)
     }
 

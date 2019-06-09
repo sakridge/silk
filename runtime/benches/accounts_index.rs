@@ -22,6 +22,7 @@ fn bench_accounts_index(bencher: &mut Bencher) {
 
     const NUM_FORKS: u64 = 16;
 
+    let mut reclaims = vec![];
     let mut stats = PerfStats::default();
     let mut index = AccountsIndex::<AccountInfo>::default();
     for f in 0..NUM_FORKS {
@@ -31,28 +32,32 @@ fn bench_accounts_index(bencher: &mut Bencher) {
                 &pubkeys[_p],
                 AccountInfo::default(),
                 &mut stats,
+                &mut reclaims,
             );
+            reclaims.clear();
         }
     }
 
     let mut fork = NUM_FORKS;
     let mut root = 0;
-    let mut ancestors = HashMap::new();
+    //let mut ancestors = HashMap::new();
     let mut zero_forks = 0;
     bencher.iter(|| {
         let mut stats = PerfStats::default();
         let mut times = 0;
         for _p in 0..NUM_PUBKEYS {
             let pubkey = thread_rng().gen_range(0, NUM_PUBKEYS);
-            /*index.insert(
+            index.insert(
                 fork,
                 &pubkeys[pubkey],
                 AccountInfo::default(),
                 &mut stats,
-            );*/
-            if index.get(&pubkeys[pubkey], &ancestors).is_some() {
+                &mut reclaims,
+            );
+            reclaims.clear();
+            /*if index.get(&pubkeys[pubkey], &ancestors).is_some() {
                 zero_forks += 1;
-            }
+            }*/
         }
         index.add_root(root);
         root += 1;

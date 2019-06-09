@@ -518,13 +518,17 @@ impl AccountsDB {
         stats: &mut PerfStats,
     ) -> (Vec<(Fork, AccountInfo)>, u64) {
         let mut reclaims = Vec::with_capacity(infos.len());
+        let cap = reclaims.capacity();
         let mut index = self.accounts_index.write().unwrap();
         let now = Instant::now();
         for (i, info) in infos.into_iter().enumerate() {
             let key = &accounts[i].0;
-            reclaims.extend(index.insert(fork_id, key, info, stats).into_iter())
+            index.insert(fork_id, key, info, stats, &mut reclaims);
         }
         stats.update_index_work += duration_as_ns(&now.elapsed());
+        if reclaims.len() > cap {
+            stats.extra = (reclaims.len() - cap) as u64;
+        }
         (reclaims, index.last_root)
     }
 

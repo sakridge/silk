@@ -75,11 +75,10 @@ impl<T: Clone + Debug> AccountsIndex<T> {
     pub fn get(&self, pubkey: &Pubkey, ancestors: &collections::HashMap<Fork, usize>) -> Option<(&T, Fork)> {
         let list = self.account_maps.get(pubkey)?;
         let mut max = 0;
-        info!("list: {:?}", list);
         let mut found_max = false;
         for e in list.0.iter().rev() {
             if *e >= max && (ancestors.get(e).is_some() || self.is_root(*e)) {
-                info!("GET {} {:?}", *e, ancestors);
+                trace!("GET {} {:?}", *e, ancestors);
                 max = *e;
                 found_max = true;
             }
@@ -99,9 +98,9 @@ impl<T: Clone + Debug> AccountsIndex<T> {
         pubkey: &Pubkey,
         account_info: T,
         stats: &mut PerfStats,
-    ) -> Vec<(Fork, T)> {
+        reclaims: &mut Vec<(Fork, T)>,
+    ) {
         stats.insert_count += 1;
-        let mut rv = Vec::with_capacity(2);
         //let now = Instant::now();
 
         let last_root = self.last_root;
@@ -111,7 +110,7 @@ impl<T: Clone + Debug> AccountsIndex<T> {
             .or_insert_with(|| (Vec::with_capacity(32)));
 
         // filter out old entries
-        rv.extend(fork_vec.iter().filter(|(f, _)| *f == fork).cloned());
+        reclaims.extend(fork_vec.iter().filter(|(f, _)| *f == fork).cloned());
         fork_vec.retain(|(f, _)| *f != fork);
 
         //stats.insert1 += duration_as_ns(&now.elapsed());
@@ -120,7 +119,7 @@ impl<T: Clone + Debug> AccountsIndex<T> {
         // add the new entry
         fork_vec.push((fork, account_info));
 
-        rv.extend(
+        reclaims.extend(
             fork_vec
                 .iter()
                 .filter(|(fork, _)| Self::is_purged(last_root, *fork))
@@ -139,7 +138,6 @@ impl<T: Clone + Debug> AccountsIndex<T> {
             stats.rv_gt_1 += 1;
         }
         stats.insert3 += duration_as_ns(&now.elapsed());*/
-        rv
     }
 
     // Vec<(Fork, T)>, HashSet<T>
@@ -153,7 +151,7 @@ impl<T: Clone + Debug> AccountsIndex<T> {
     ) -> Vec<(Fork, T)> {
         stats.insert_count += 1;
         let mut rv = Vec::with_capacity(2);
-        let now = Instant::now();
+        //let now = Instant::now();
 
         let last_root = self.last_root;
         let fork_vec = self
@@ -161,8 +159,8 @@ impl<T: Clone + Debug> AccountsIndex<T> {
             .entry(*pubkey)
             .or_insert_with(|| (Vec::with_capacity(32), HashSet::new()));
 
-        stats.insert1 += duration_as_ns(&now.elapsed());
-        let now = Instant::now();
+        //stats.insert1 += duration_as_ns(&now.elapsed());
+        //let now = Instant::now();
 
         if fork_vec.1.contains(&fork) {
             stats.contains += 1;
@@ -173,8 +171,8 @@ impl<T: Clone + Debug> AccountsIndex<T> {
             fork_vec.1.insert(fork);
         }
 
-        stats.insert2 += duration_as_ns(&now.elapsed());
-        let now = Instant::now();
+        //stats.insert2 += duration_as_ns(&now.elapsed());
+        //let now = Instant::now();
 
         // add the new entry
         fork_vec.0.push((fork, account_info));
@@ -193,15 +191,15 @@ impl<T: Clone + Debug> AccountsIndex<T> {
                 .cloned();
             rv.extend(purged_entries);
         }
-        info!("vec: {:?}", fork_vec);
 
-        if rv.len() > 0 {
+        /*if rv.len() > 0 {
             stats.rv_gt_0 += 1;
         }
         if rv.len() > 1 {
             stats.rv_gt_1 += 1;
         }
         stats.insert3 += duration_as_ns(&now.elapsed());
+        */
         rv
     }
 
@@ -337,7 +335,8 @@ mod tests {
         solana_logger::setup();
         let key = Keypair::new();
         let mut index = AccountsIndex::<bool>::default();
-        let gc = index.insert(0, &key.pubkey(), true, &mut PerfStats::default());
+        let mut gc = Vec::new();
+        index.insert(0, &key.pubkey(), true, &mut PerfStats::default(), &mut gc);
         assert!(gc.is_empty());
 
         let ancestors = collections::HashMap::new();
@@ -348,7 +347,8 @@ mod tests {
     fn test_insert_wrong_ancestors() {
         let key = Keypair::new();
         let mut index = AccountsIndex::<bool>::default();
-        let gc = index.insert(0, &key.pubkey(), true, &mut PerfStats::default());
+        let mut gc = Vec::new();
+        index.insert(0, &key.pubkey(), true, &mut PerfStats::default(), &mut gc);
         assert!(gc.is_empty());
 
         let ancestors = vec![(1, 1)].into_iter().collect();
@@ -359,7 +359,8 @@ mod tests {
     fn test_insert_with_ancestors() {
         let key = Keypair::new();
         let mut index = AccountsIndex::<bool>::default();
-        let gc = index.insert(0, &key.pubkey(), true, &mut PerfStats::default());
+        let mut gc = Vec::new();
+        index.insert(0, &key.pubkey(), true, &mut PerfStats::default(), &mut gc);
         assert!(gc.is_empty());
 
         let ancestors = vec![(0, 0)].into_iter().collect();
@@ -378,7 +379,8 @@ mod tests {
     fn test_insert_with_root() {
         let key = Keypair::new();
         let mut index = AccountsIndex::<bool>::default();
-        let gc = index.insert(0, &key.pubkey(), true, &mut PerfStats::default());
+        let mut gc = Vec::new();
+        index.insert(0, &key.pubkey(), true, &mut PerfStats::default(), &mut gc);
         assert!(gc.is_empty());
 
         let ancestors = vec![].into_iter().collect();
@@ -438,11 +440,13 @@ mod tests {
         let key = Keypair::new();
         let mut index = AccountsIndex::<bool>::default();
         let ancestors = vec![(0, 0)].into_iter().collect();
-        let gc = index.insert(0, &key.pubkey(), true, &mut PerfStats::default());
+        let mut gc = Vec::new();
+        index.insert(0, &key.pubkey(), true, &mut PerfStats::default(), &mut gc);
         assert!(gc.is_empty());
         assert_eq!(index.get(&key.pubkey(), &ancestors), Some((&true, 0)));
 
-        let gc = index.insert(0, &key.pubkey(), false, &mut PerfStats::default());
+        let mut gc = Vec::new();
+        index.insert(0, &key.pubkey(), false, &mut PerfStats::default(), &mut gc);
         assert_eq!(gc, vec![(0, true)]);
         assert_eq!(index.get(&key.pubkey(), &ancestors), Some((&false, 0)));
     }
@@ -452,9 +456,10 @@ mod tests {
         let key = Keypair::new();
         let mut index = AccountsIndex::<bool>::default();
         let ancestors = vec![(0, 0)].into_iter().collect();
-        let gc = index.insert(0, &key.pubkey(), true, &mut PerfStats::default());
+        let mut gc = Vec::new();
+        index.insert(0, &key.pubkey(), true, &mut PerfStats::default(), &mut gc);
         assert!(gc.is_empty());
-        let gc = index.insert(1, &key.pubkey(), false, &mut PerfStats::default());
+        index.insert(1, &key.pubkey(), false, &mut PerfStats::default(), &mut gc);
         assert!(gc.is_empty());
         assert_eq!(index.get(&key.pubkey(), &ancestors), Some((&true, 0)));
         let ancestors = vec![(1, 0)].into_iter().collect();
@@ -465,10 +470,11 @@ mod tests {
     fn test_update_gc_purged_fork() {
         let key = Keypair::new();
         let mut index = AccountsIndex::<bool>::default();
-        let gc = index.insert(0, &key.pubkey(), true, &mut PerfStats::default());
+        let mut gc = Vec::new();
+        index.insert(0, &key.pubkey(), true, &mut PerfStats::default(), &mut gc);
         assert!(gc.is_empty());
         index.add_root(1);
-        let gc = index.insert(1, &key.pubkey(), false, &mut PerfStats::default());
+        index.insert(1, &key.pubkey(), false, &mut PerfStats::default(), &mut gc);
         assert_eq!(gc, vec![(0, true)]);
         let ancestors = vec![].into_iter().collect();
         assert_eq!(index.get(&key.pubkey(), &ancestors), Some((&false, 1)));

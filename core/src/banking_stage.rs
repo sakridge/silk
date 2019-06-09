@@ -419,13 +419,14 @@ impl BankingStage {
         lock_results: &LockedAccountsResults<Transaction>,
         id: u32,
     ) -> Result<()> {
+        let mut stats = PerfStats::default();
         let now = Instant::now();
         // Use a shorter maximum age when adding transactions into the pipeline.  This will reduce
         // the likelihood of any single thread getting starved and processing old ids.
         // TODO: Banking stage threads should be prioritized to complete faster then this queue
         // expires.
         let (loaded_accounts, results) =
-            bank.load_and_execute_transactions(txs, lock_results, MAX_RECENT_BLOCKHASHES / 2);
+            bank.load_and_execute_transactions(txs, lock_results, MAX_RECENT_BLOCKHASHES / 2, &mut stats);
         let load_execute_time = now.elapsed();
 
         let freeze_lock = bank.freeze_lock();
@@ -438,7 +439,6 @@ impl BankingStage {
             (now.elapsed(), record_locks, num_recorded)
         };
 
-        let mut stats = PerfStats::default();
         let commit_time = {
             let now = Instant::now();
             bank.commit_transactions(txs, &loaded_accounts, &results, &mut stats);
