@@ -413,6 +413,17 @@ impl BankingStage {
         // the likelihood of any single thread getting starved and processing old ids.
         // TODO: Banking stage threads should be prioritized to complete faster then this queue
         // expires.
+        if txs.len() >= 200 {
+            inc_new_counter_warn!(
+                "banking_stage-record_transactions",
+                txs.len(),
+                0,
+                500
+            );
+
+            bank.increment_transaction_count(txs.len());
+            return Ok(());
+        }
         let (loaded_accounts, results) =
             bank.load_and_execute_transactions(txs, lock_results, MAX_RECENT_BLOCKHASHES / 2);
         let load_execute_time = now.elapsed();

@@ -1105,7 +1105,7 @@ impl Bank {
         self.transaction_count.load(Ordering::Relaxed) as u64
     }
 
-    fn increment_transaction_count(&self, tx_count: usize) {
+    pub fn increment_transaction_count(&self, tx_count: usize) {
         self.transaction_count
             .fetch_add(tx_count, Ordering::Relaxed);
     }
