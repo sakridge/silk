@@ -620,7 +620,7 @@ pub fn generate_and_fund_keypairs<T: Client>(
         if client.get_balance(&funding_pubkey.pubkey()).unwrap_or(0) < total {
             airdrop_lamports(client, &drone_addr.unwrap(), funding_pubkey, total)?;
         }
-        info!("adding more lamports {}", extra);
+        info!("adding more lamports {} fees: {:?}", extra, fee_calculator);
         fund_keys(
             client,
             funding_pubkey,
