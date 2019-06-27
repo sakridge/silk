@@ -40,6 +40,7 @@ pub fn parse_args(matches: &ArgMatches<'_>) -> Result<WalletConfig, Box<dyn erro
 
         path.to_str().unwrap()
     };
+    println!("Using keypair: {}", id_path);
     let keypair = read_keypair(id_path).or_else(|err| {
         Err(WalletError::BadParameter(format!(
             "{}: Unable to open keypair file: {}",
