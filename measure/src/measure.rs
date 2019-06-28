@@ -1,22 +1,54 @@
 use solana_sdk::timing::duration_as_ns;
 use std::{fmt, time::Instant};
 
+#[cfg(feature = "nvtx")]
+#[link(name = "nvToolsExt")]
+extern "C" {
+    fn nvtxRangeStartA(name: *const libc::c_char) -> u64;
+    fn nvtxRangeEnd(id: u64);
+}
+
+#[cfg(feature = "nvtx")]
+pub fn nv_range_start(name: String) -> u64 {
+    use std::ffi::CString;
+
+    unsafe {
+        let cname = CString::new(name).unwrap();
+        nvtxRangeStartA(cname.as_ptr())
+    }
+}
+
+#[cfg(feature = "nvtx")]
+pub fn nv_range_end(id: u64) {
+    unsafe {
+        nvtxRangeEnd(id);
+    }
+}
+
 pub struct Measure {
     name: &'static str,
     start: Instant,
     duration: u64,
+    #[cfg(feature = "nvtx")]
+    nvtx_id: u64,
 }
 
 impl Measure {
     pub fn start(name: &'static str) -> Self {
+        #[cfg(feature = "nvtx")]
+        let nvtx_id = nv_range_start(_name.to_string());
         Self {
             name,
             start: Instant::now(),
             duration: 0,
+            #[cfg(feature = "nvtx")]
+            nvtx_id,
         }
     }
 
     pub fn stop(&mut self) {
+        #[cfg(feature = "nvtx")]
+        nv_range_end(self.nvtx_id);
         self.duration = duration_as_ns(&self.start.elapsed());
     }
 
