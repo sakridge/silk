@@ -2593,6 +2593,7 @@ dependencies = [
 name = "solana-measure"
 version = "0.17.0"
 dependencies = [
+ "libc 0.2.58 (registry+https://github.com/rust-lang/crates.io-index)",
  "solana-sdk 0.17.0",
 ]
 
