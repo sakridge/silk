@@ -22,6 +22,7 @@ use solana_sdk::poh_config::PohConfig;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::timing;
 use solana_sdk::transaction::Transaction;
+use solana_measure::measure::Measure;
 use std::sync::mpsc::{channel, Receiver, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -182,6 +183,7 @@ impl PohRecorder {
         my_next_leader_slot: Option<u64>,
         ticks_per_slot: u64,
     ) {
+        let mut reset_time = Measure::start("poh_recorder::reset");
         self.clear_bank();
         let mut cache = vec![];
         {
@@ -206,6 +208,7 @@ impl PohRecorder {
         self.start_leader_at_tick = start_leader_at_tick;
         self.last_leader_tick = last_leader_tick;
         self.ticks_per_slot = ticks_per_slot;
+        reset_time.stop();
     }
 
     pub fn set_working_bank(&mut self, working_bank: WorkingBank) {
@@ -227,6 +230,7 @@ impl PohRecorder {
     // On a record flush will flush the cache at the WorkingBank::min_tick_height, since a record
     // occurs after the min_tick_height was generated
     fn flush_cache(&mut self, tick: bool) -> Result<()> {
+        let mut flush_cache_time = Measure::start("flush_cache");
         // check_tick_height is called before flush cache, so it cannot overrun the bank
         // so a bank that is so late that it's slot fully generated before it starts recording
         // will fail instead of broadcasting any ticks
@@ -284,6 +288,7 @@ impl PohRecorder {
             // commit the flush
             let _ = self.tick_cache.drain(..entry_count);
         }
+        flush_cache_time.stop();
 
         Ok(())
     }

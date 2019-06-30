@@ -435,9 +435,14 @@ impl AccountsDB {
         ancestors: &HashMap<Fork, usize>,
         pubkey: &Pubkey,
     ) -> Option<(Account, Fork)> {
+        let mut accounts_load = Measure::start("accounts_load_slow");
         let accounts_index = self.accounts_index.read().unwrap();
+        let mut accounts_load_work = Measure::start("accounts_load_slow_work");
         let storage = self.storage.read().unwrap();
-        Self::load(&storage, ancestors, &accounts_index, pubkey)
+        let account = Self::load(&storage, ancestors, &accounts_index, pubkey);
+        accounts_load_work.stop();
+        accounts_load.stop();
+        account
     }
 
     fn find_storage_candidate(&self, fork_id: Fork) -> Arc<AccountStorageEntry> {
@@ -612,7 +617,9 @@ impl AccountsDB {
     }
 
     pub fn add_root(&self, fork: Fork) {
-        self.accounts_index.write().unwrap().add_root(fork)
+        let mut add_root = Measure::start("add_root");
+        self.accounts_index.write().unwrap().add_root(fork);
+        add_root.stop();
     }
 
     fn merge(
@@ -635,6 +642,7 @@ impl AccountsDB {
     }
 
     fn generate_index(&self) {
+        let mut generate_index_time = Measure::start("generate_index");
         let storage = self.storage.read().unwrap();
         let mut forks: Vec<Fork> = storage.0.keys().cloned().collect();
         forks.sort();
@@ -671,6 +679,7 @@ impl AccountsDB {
                 }
             }
         }
+        generate_index_time.stop();
     }
 }
 

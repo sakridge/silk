@@ -12,6 +12,7 @@ use solana_metrics::inc_new_counter_error;
 use solana_sdk::account::Account;
 use solana_sdk::hash::{Hash, Hasher};
 use solana_sdk::message::Message;
+use solana_measure::measure::Measure;
 use solana_sdk::native_loader;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, KeypairUtil};
@@ -264,7 +265,8 @@ impl Accounts {
         //TODO: two locks usually leads to deadlocks, should this be one structure?
         let accounts_index = self.accounts_db.accounts_index.read().unwrap();
         let storage = self.accounts_db.storage.read().unwrap();
-        txs.iter()
+        let mut load_accounts_time = Measure::start("load_accounts");
+        let res = txs.iter()
             .zip(lock_results.into_iter())
             .map(|etx| match etx {
                 (tx, Ok(())) => {
@@ -292,7 +294,9 @@ impl Accounts {
                 }
                 (_, Err(e)) => Err(e),
             })
-            .collect()
+            .collect();
+        load_accounts_time.stop();
+        res
     }
 
     /// Slow because lock is held for 1 operation instead of many
