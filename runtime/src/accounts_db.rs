@@ -412,6 +412,15 @@ impl AccountsDB {
         })
     }
 
+    pub fn lookup_index(
+        ancestors: &HashMap<Fork, usize>,
+        accounts_index: &AccountsIndex<AccountInfo>,
+        pubkey: &Pubkey,
+    ) -> Option<(AccountInfo, Fork)> {
+        let (info, fork) = accounts_index.get(pubkey, ancestors)?;
+        Some((*info, fork))
+    }
+
     pub fn load(
         storage: &AccountStorage,
         ancestors: &HashMap<Fork, usize>,

@@ -132,6 +132,35 @@ impl Accounts {
         self.accounts_db.update_from_stream(stream)
     }
 
+    fn get_pubkeys_to_load(
+        tx: &Transaction,
+        fee: u64,
+        error_counters: &mut ErrorCounters,
+    ) -> Result<(Vec<Pubkey>, InstructionCredits)> {
+        let message = tx.message();
+        let mut credits: InstructionCredits = vec![];
+        let mut keys = vec![];
+        if tx.signatures.is_empty() && fee != 0 {
+            Err(TransactionError::MissingSignatureForFee)
+        } else {
+            // Check for unique account keys
+            if has_duplicates(&message.account_keys) {
+                error_counters.account_loaded_twice += 1;
+                return Err(TransactionError::AccountLoadedTwice);
+            }
+
+            // There is no way to predict what program will execute without an error
+            // If a fee can pay for execution then the program will be scheduled
+            for key in message.account_keys.iter() {
+                if !message.program_ids().contains(&key) {
+                    keys.push(*key);
+                    credits.push(0);
+                }
+            }
+            Ok((keys, credits))
+        }
+    }
+
     fn load_tx_accounts(
         storage: &AccountStorage,
         ancestors: &HashMap<Fork, usize>,
@@ -263,10 +292,40 @@ impl Accounts {
     ) -> Vec<Result<(InstructionAccounts, InstructionLoaders, InstructionCredits)>> {
         //PERF: hold the lock to scan for the references, but not to clone the accounts
         //TODO: two locks usually leads to deadlocks, should this be one structure?
-        let accounts_index = self.accounts_db.accounts_index.read().unwrap();
         let storage = self.accounts_db.storage.read().unwrap();
         let mut load_accounts_time = Measure::start("load_accounts");
-        let res = txs.iter()
+
+        let keys: Vec<_> = txs.iter()
+            .zip(lock_results.into_iter())
+            .map(|etx| match etx {
+                (tx, Ok(())) => {
+                    let fee_calculator = hash_queue
+                        .get_fee_calculator(&tx.message().recent_blockhash)
+                        .ok_or(TransactionError::BlockhashNotFound)?;
+
+                    let fee = fee_calculator.calculate_fee(tx.message());
+
+                    Self::get_pubkeys_to_load(&tx, fee, error_counters)
+                }
+                (_, Err(e)) => {
+                    Err(e)
+                }
+            }).collect();
+        let accounts_index = self.accounts_db.accounts_index.read().unwrap();
+        let indexes = keys.into_iter()
+            .map(|k| match k {
+                Ok((keys, credits)) => {
+                    let mut indexes = vec![];
+                    for k in &keys {
+                        indexes.push(AccountsDB::lookup_index(ancestors, &accounts_index, k)
+                            .map(|(account, _)| account)
+                            .unwrap_or_default());
+                    }
+                    indexes
+                }
+            }).collect();
+        drop(accounts_index);
+        /*let res = txs.iter()
             .zip(lock_results.into_iter())
             .map(|etx| match etx {
                 (tx, Ok(())) => {
@@ -294,7 +353,7 @@ impl Accounts {
                 }
                 (_, Err(e)) => Err(e),
             })
-            .collect();
+            .collect();*/
         load_accounts_time.stop();
         res
     }
