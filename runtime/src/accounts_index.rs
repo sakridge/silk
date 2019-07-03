@@ -3,6 +3,8 @@ use log::*;
 use solana_sdk::pubkey::Pubkey;
 use std::collections;
 use std::collections::HashSet;
+use std::fmt::Debug;
+use rand::{thread_rng, Rng};
 
 pub type Fork = u64;
 
@@ -16,7 +18,7 @@ pub struct AccountsIndex<T> {
     pub last_root: Fork,
 }
 
-impl<T: Clone> AccountsIndex<T> {
+impl<T: Clone + Debug> AccountsIndex<T> {
     /// Get an account
     /// The latest account that appears in `ancestors` or `roots` is returned.
     pub fn get(
@@ -76,6 +78,10 @@ impl<T: Clone> AccountsIndex<T> {
                 .cloned(),
         );
         fork_vec.retain(|(fork, _)| !Self::can_purge(max_root, *fork));
+        let rand = thread_rng().gen_range(0, 1000);
+        if rand == 0 {
+            info!("fork_vec: {:?}", fork_vec);
+        }
     }
 
     pub fn add_index(&mut self, fork: Fork, pubkey: &Pubkey, account_info: T) {
