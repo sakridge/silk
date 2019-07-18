@@ -53,4 +53,5 @@ exclude = [
     "programs/bpf/rust/noop",
     "programs/move_loader_api",
     "programs/move_loader_program",
+    "programs/librapay_api",
 ]

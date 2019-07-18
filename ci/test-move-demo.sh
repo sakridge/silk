@@ -32,3 +32,4 @@ export RUST_BACKTRACE=1
 # Run Move tests
 _ cargo +"$rust_stable" test --manifest-path=programs/move_loader_program/Cargo.toml ${V:+--verbose}
 _ cargo +"$rust_stable" test --manifest-path=programs/move_loader_api/Cargo.toml ${V:+--verbose}
+_ cargo +"$rust_stable" test --manifest-path=programs/librapay_api/Cargo.toml ${V:+--verbose}
