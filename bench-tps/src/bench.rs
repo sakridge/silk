@@ -24,12 +24,124 @@ use std::thread::Builder;
 use std::time::Duration;
 use std::time::Instant;
 
+use bincode;
+use compiler::Compiler;
+use solana_sdk::instruction::{AccountMeta, Instruction};
+use solana_sdk::loader_instruction::LoaderInstruction;
+use solana_sdk::pubkey::Pubkey;
+use types::account_address::AccountAddress;
+use types::transaction::{Program, TransactionArgument};
+
 pub const MAX_SPENDS_PER_TX: u64 = 4;
 pub const NUM_LAMPORTS_PER_ACCOUNT: u64 = 128;
 
 #[derive(Debug)]
 pub enum BenchTpsError {
     AirdropFailure,
+}
+
+const USE_MOVE: bool = true;
+const MOVE_LOADER_PROGRAM_ID: [u8; 32] = [
+    5, 91, 237, 31, 90, 253, 197, 145, 157, 236, 147, 43, 6, 5, 157, 238, 63, 151, 181, 165, 118,
+    224, 198, 97, 103, 136, 113, 64, 0, 0, 0, 0,
+];
+
+fn new_move_transaction(
+    program_id: &Pubkey,
+    from: &Keypair,
+    recent_blockhash: Hash,
+    args: Vec<TransactionArgument>,
+) -> Transaction {
+    let data = bincode::serialize(&args).unwrap();
+    let ix = LoaderInstruction::InvokeMain { data };
+    let ix_data = bincode::serialize(&ix).unwrap();
+
+    let accounts = vec![AccountMeta::new(from.pubkey(), true)];
+
+    let ixs = vec![Instruction::new(*program_id, &ix_data, accounts)];
+    Transaction::new_signed_instructions(&[from], ixs, recent_blockhash)
+}
+
+fn upload_move_program<T: Client>(from: &Keypair, client: &Arc<T>) -> Pubkey {
+    let code = "//! no-execute
+
+    // A small variant of the peer-peer payment example that creates a fresh
+    // account if one does not already exist.
+
+    import 0x0.LibraAccount;
+    import 0x0.LibraCoin;
+    main(payee: address, amount: u64) {
+      let coin: R#LibraCoin.T;
+      let account_exists: bool;
+
+      // Acquire a LibraCoin.T resource with value `amount` from the sender's
+      // account.  This will fail if the sender's balance is less than `amount`.
+      coin = LibraAccount.withdraw_from_sender(move(amount));
+
+      account_exists = LibraAccount.exists(copy(payee));
+
+      if (!move(account_exists)) {
+        // Creates a fresh account at the address `payee` by publishing a
+        // LibraAccount.T resource under this address. If there is already a
+        // LibraAccount.T resource under the address, this will fail.
+        create_account(copy(payee));
+      }
+
+      LibraAccount.deposit(move(payee), move(coin));
+      return;
+    }";
+
+    let address = AccountAddress::default();
+    let compiler = Compiler {
+        code,
+        address,
+        ..Compiler::default()
+    };
+    let compiled_program = compiler.into_compiled_program().expect("Failed to compile");
+
+    let mut script = vec![];
+    compiled_program
+        .script
+        .serialize(&mut script)
+        .expect("Unable to serialize script");
+    let mut modules = vec![];
+    for m in compiled_program.modules.iter() {
+        let mut buf = vec![];
+        m.serialize(&mut buf).expect("Unable to serialize module");
+        modules.push(buf);
+    }
+
+    let accounts = vec![AccountMeta::new(from.pubkey(), true)];
+
+    let program = Program::new(script, modules, vec![]);
+    let program_bytes = serde_json::to_vec(&program).unwrap();
+
+    let move_program_pubkey = Pubkey::new_rand();
+
+    let program_id = Pubkey::new(&MOVE_LOADER_PROGRAM_ID);
+
+    let (recent_blockhash, _fee_calculator) = client.get_recent_blockhash().unwrap();
+
+    let ix = LoaderInstruction::Write {
+        offset: 0,
+        bytes: program_bytes,
+    };
+    let ix_data = bincode::serialize(&ix).unwrap();
+    let ixs = vec![Instruction::new(program_id, &ix_data, accounts.clone())];
+    let tx = Transaction::new_signed_instructions(&[from], ixs, recent_blockhash);
+    client
+        .async_send_transaction(tx)
+        .expect("async_send_transaction in do_tx_transfers");
+
+    let ix = LoaderInstruction::Finalize;
+    let ix_data = bincode::serialize(&ix).unwrap();
+    let ixs = vec![Instruction::new(program_id, &ix_data, accounts)];
+    let tx = Transaction::new_signed_instructions(&[from], ixs, recent_blockhash);
+    client
+        .async_send_transaction(tx)
+        .expect("async_send_transaction in do_tx_transfers");
+
+    move_program_pubkey
 }
 
 pub type Result<T> = std::result::Result<T, BenchTpsError>;
@@ -86,6 +198,12 @@ where
     println!("Initial transaction count {}", first_tx_count);
 
     let exit_signal = Arc::new(AtomicBool::new(false));
+
+    let program_id = if USE_MOVE {
+        upload_move_program(&keypairs[0], client)
+    } else {
+        Pubkey::default()
+    };
 
     // Setup a thread per validator to sample every period
     // collect the max transaction rate and total tx count seen
@@ -165,6 +283,7 @@ where
             &keypairs[len..],
             threads,
             reclaim_lamports_back_to_source_account,
+            &program_id,
         );
         // In sustained mode overlap the transfers with generation
         // this has higher average performance but lower peak performance
@@ -228,6 +347,7 @@ fn generate_txs(
     dest: &[Keypair],
     threads: usize,
     reclaim: bool,
+    program_id: &Pubkey,
 ) {
     let tx_count = source.len();
     println!("Signing transactions... {} (reclaim={})", tx_count, reclaim);
@@ -241,10 +361,23 @@ fn generate_txs(
     let transactions: Vec<_> = pairs
         .par_iter()
         .map(|(id, keypair)| {
-            (
-                system_transaction::create_user_account(id, &keypair.pubkey(), 1, *blockhash),
-                timestamp(),
-            )
+            if USE_MOVE {
+                let mut pubkey = [0u8; 32];
+                pubkey.copy_from_slice(&id.pubkey().as_ref());
+                let args = vec![
+                    TransactionArgument::Address(AccountAddress::new(pubkey)),
+                    TransactionArgument::U64(1),
+                ];
+                (
+                    new_move_transaction(program_id, &keypair, *blockhash, args),
+                    timestamp(),
+                )
+            } else {
+                (
+                    system_transaction::create_user_account(id, &keypair.pubkey(), 1, *blockhash),
+                    timestamp(),
+                )
+            }
         })
         .collect();
 
