@@ -66,6 +66,8 @@ solana-stake-api = { path = "../programs/stake_api", version = "0.17.0" }
 solana-stake-program = { path = "../programs/stake_program", version = "0.17.0" }
 solana-storage-api = { path = "../programs/storage_api", version = "0.17.0" }
 solana-storage-program = { path = "../programs/storage_program", version = "0.17.0" }
+solana-move-loader-program = { path = "../programs/move_loader_program", version = "0.17.0" }
+solana-move-loader-api = { path = "../programs/move_loader_api", version = "0.17.0" }
 solana-vote-api = { path = "../programs/vote_api", version = "0.17.0" }
 solana-vote-program = { path = "../programs/vote_program", version = "0.17.0" }
 solana-vote-signer = { path = "../vote-signer", version = "0.17.0" }

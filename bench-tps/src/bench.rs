@@ -1,5 +1,8 @@
 use solana_metrics;
 
+#[macro_use]
+extern crate solana_move_loader_api;
+
 use log::*;
 use rayon::prelude::*;
 use solana::gen_keys::GenKeys;
@@ -26,6 +29,7 @@ use std::time::Instant;
 
 use bincode;
 use compiler::Compiler;
+use solana_runtime::loader_utils::load_program;
 use solana_sdk::instruction::{AccountMeta, Instruction};
 use solana_sdk::loader_instruction::LoaderInstruction;
 use solana_sdk::pubkey::Pubkey;
@@ -41,10 +45,6 @@ pub enum BenchTpsError {
 }
 
 const USE_MOVE: bool = true;
-const MOVE_LOADER_PROGRAM_ID: [u8; 32] = [
-    5, 91, 237, 31, 90, 253, 197, 145, 157, 236, 147, 43, 6, 5, 157, 238, 63, 151, 181, 165, 118,
-    224, 198, 97, 103, 136, 113, 64, 0, 0, 0, 0,
-];
 
 fn new_move_transaction(
     program_id: &Pubkey,
@@ -111,37 +111,10 @@ fn upload_move_program<T: Client>(from: &Keypair, client: &Arc<T>) -> Pubkey {
         modules.push(buf);
     }
 
-    let accounts = vec![AccountMeta::new(from.pubkey(), true)];
-
     let program = Program::new(script, modules, vec![]);
     let program_bytes = serde_json::to_vec(&program).unwrap();
 
-    let move_program_pubkey = Pubkey::new_rand();
-
-    let program_id = Pubkey::new(&MOVE_LOADER_PROGRAM_ID);
-
-    let (recent_blockhash, _fee_calculator) = client.get_recent_blockhash().unwrap();
-
-    let ix = LoaderInstruction::Write {
-        offset: 0,
-        bytes: program_bytes,
-    };
-    let ix_data = bincode::serialize(&ix).unwrap();
-    let ixs = vec![Instruction::new(program_id, &ix_data, accounts.clone())];
-    let tx = Transaction::new_signed_instructions(&[from], ixs, recent_blockhash);
-    client
-        .async_send_transaction(tx)
-        .expect("async_send_transaction in do_tx_transfers");
-
-    let ix = LoaderInstruction::Finalize;
-    let ix_data = bincode::serialize(&ix).unwrap();
-    let ixs = vec![Instruction::new(program_id, &ix_data, accounts)];
-    let tx = Transaction::new_signed_instructions(&[from], ixs, recent_blockhash);
-    client
-        .async_send_transaction(tx)
-        .expect("async_send_transaction in do_tx_transfers");
-
-    move_program_pubkey
+    load_program(client, &from, &solana_move_loader_api::id(), program_bytes)
 }
 
 pub type Result<T> = std::result::Result<T, BenchTpsError>;
@@ -828,7 +801,7 @@ mod tests {
 
         let mut config = Config::default();
         config.tx_count = 100;
-        config.duration = Duration::from_secs(5);
+        config.duration = Duration::from_secs(10);
 
         let client = create_client(
             (cluster.entry_point_info.rpc, cluster.entry_point_info.tpu),

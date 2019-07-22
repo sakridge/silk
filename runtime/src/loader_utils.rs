@@ -1,15 +1,16 @@
-use crate::bank_client::BankClient;
+use log::*;
 use serde::Serialize;
-use solana_sdk::client::SyncClient;
+use solana_sdk::client::Client;
 use solana_sdk::instruction::{AccountMeta, Instruction};
 use solana_sdk::loader_instruction;
 use solana_sdk::message::Message;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, KeypairUtil};
 use solana_sdk::system_instruction;
+use std::sync::Arc;
 
-pub fn load_program(
-    bank_client: &BankClient,
+pub fn load_program<T: Client>(
+    bank_client: &Arc<T>,
     from_keypair: &Keypair,
     loader_pubkey: &Pubkey,
     program: Vec<u8>,

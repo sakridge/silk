@@ -26,6 +26,7 @@ solana-sdk = { path = "../sdk", version = "0.17.0" }
 types = { git = "https://github.com/solana-labs/libra", branch = "solana-0.0.0" }
 compiler = { git = "https://github.com/solana-labs/libra", branch = "solana-0.0.0" }
 bincode = "1.1.4"
+solana-move-loader-api = { path = "../programs/move_loader_api", version = "0.17.0" }
 
 [features]
 cuda = ["solana/cuda"]

@@ -29,6 +29,8 @@ use std::fs::remove_dir_all;
 use std::io::{Error, ErrorKind, Result};
 use std::sync::Arc;
 
+use solana_move_loader_api;
+
 pub struct ValidatorInfo {
     pub keypair: Arc<Keypair>,
     pub voting_keypair: Arc<Keypair>,
@@ -164,6 +166,9 @@ impl LocalCluster {
         genesis_block
             .native_instruction_processors
             .push(solana_storage_program!());
+        genesis_block
+            .native_instruction_processors
+            .push(solana_move_loader_program!());
 
         let (leader_ledger_path, _blockhash) = create_new_tmp_ledger!(&genesis_block);
         let leader_contact_info = leader_node.info.clone();
