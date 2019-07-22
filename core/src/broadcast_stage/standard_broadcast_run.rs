@@ -33,7 +33,7 @@ impl StandardBroadcastRun {
         self.stats.to_blobs_elapsed.push(to_blobs_elapsed);
         self.stats.run_elapsed.push(run_elapsed);
         if self.stats.num_entries.len() >= 16 {
-            info!(
+            debug!(
                 "broadcast: entries: {:?} blob times ms: {:?} broadcast times ms: {:?}",
                 self.stats.num_entries, self.stats.to_blobs_elapsed, self.stats.run_elapsed
             );

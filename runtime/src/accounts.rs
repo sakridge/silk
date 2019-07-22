@@ -106,6 +106,14 @@ impl Accounts {
             }
             if called_accounts.is_empty() || called_accounts[0].lamports == 0 {
                 error_counters.account_not_found += 1;
+                info!(
+                    "called_accounts: {} {}",
+                    called_accounts.len(),
+                    called_accounts
+                        .get(0)
+                        .unwrap_or(&Account::default())
+                        .lamports
+                );
                 Err(TransactionError::AccountNotFound)
             /*} else if called_accounts[0].owner != system_program::id() {
                 error_counters.invalid_account_for_fee += 1;

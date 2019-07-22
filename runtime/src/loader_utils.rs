@@ -16,6 +16,7 @@ pub fn load_program<T: Client>(
     let program_keypair = Keypair::new();
     let program_pubkey = program_keypair.pubkey();
 
+    info!("creating account:");
     let instruction = system_instruction::create_account(
         &from_keypair.pubkey(),
         &program_pubkey,
@@ -29,7 +30,8 @@ pub fn load_program<T: Client>(
 
     let chunk_size = 256; // Size of chunk just needs to fit into tx
     let mut offset = 0;
-    for chunk in program.chunks(chunk_size) {
+    for (i, chunk) in program.chunks(chunk_size).enumerate() {
+        info!("sending chunk: {}", i);
         let instruction =
             loader_instruction::write(&program_pubkey, loader_pubkey, offset, chunk.to_vec());
         let message = Message::new_with_payer(vec![instruction], Some(&from_keypair.pubkey()));

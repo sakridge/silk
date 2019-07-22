@@ -16,7 +16,7 @@ fn create_system_account(
     program_id: &Pubkey,
 ) -> Result<(), SystemError> {
     if !system_program::check_id(&keyed_accounts[FROM_ACCOUNT_INDEX].account.owner) {
-        debug!(
+        info!(
             "CreateAccount: invalid account[from] owner {} ",
             &keyed_accounts[FROM_ACCOUNT_INDEX].account.owner
         );
@@ -26,7 +26,7 @@ fn create_system_account(
     if !keyed_accounts[TO_ACCOUNT_INDEX].account.data.is_empty()
         || !system_program::check_id(&keyed_accounts[TO_ACCOUNT_INDEX].account.owner)
     {
-        debug!(
+        info!(
             "CreateAccount: invalid argument; account {} already in use",
             keyed_accounts[TO_ACCOUNT_INDEX].unsigned_key()
         );
@@ -34,7 +34,7 @@ fn create_system_account(
     }
 
     if sysvar::check_id(&program_id) {
-        debug!(
+        info!(
             "CreateAccount: invalid argument; program id {} invalid",
             program_id
         );
@@ -42,7 +42,7 @@ fn create_system_account(
     }
 
     if sysvar::is_sysvar_id(&keyed_accounts[TO_ACCOUNT_INDEX].unsigned_key()) {
-        debug!(
+        info!(
             "CreateAccount: invalid argument; account id {} invalid",
             program_id
         );
@@ -50,11 +50,14 @@ fn create_system_account(
     }
 
     if lamports > keyed_accounts[FROM_ACCOUNT_INDEX].account.lamports {
-        debug!(
+        info!(
             "CreateAccount: insufficient lamports ({}, need {})",
             keyed_accounts[FROM_ACCOUNT_INDEX].account.lamports, lamports
         );
         Err(SystemError::ResultWithNegativeLamports)?;
+    }
+    if space > 1024 {
+        info!("creating account {}", space);
     }
     keyed_accounts[FROM_ACCOUNT_INDEX].account.lamports -= lamports;
     keyed_accounts[TO_ACCOUNT_INDEX].account.lamports += lamports;
