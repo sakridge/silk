@@ -1,3 +1,4 @@
+use log::*;
 use serde::Serialize;
 use solana_sdk::client::Client;
 use solana_sdk::instruction::{AccountMeta, Instruction};
