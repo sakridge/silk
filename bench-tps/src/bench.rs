@@ -8,6 +8,7 @@ use solana_drone::drone::request_airdrop_transaction;
 use solana_metrics::datapoint_info;
 use solana_sdk::client::Client;
 use solana_sdk::hash::Hash;
+use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, KeypairUtil};
 use solana_sdk::system_instruction;
 use solana_sdk::system_transaction;
@@ -24,6 +25,8 @@ use std::thread::Builder;
 use std::time::Duration;
 use std::time::Instant;
 
+use solana_librapay_api::librapay_transaction;
+
 pub const MAX_SPENDS_PER_TX: u64 = 4;
 pub const NUM_LAMPORTS_PER_ACCOUNT: u64 = 128;
 
@@ -31,6 +34,8 @@ pub const NUM_LAMPORTS_PER_ACCOUNT: u64 = 128;
 pub enum BenchTpsError {
     AirdropFailure,
 }
+
+const USE_MOVE: bool = false;
 
 pub type Result<T> = std::result::Result<T, BenchTpsError>;
 
@@ -81,6 +86,12 @@ where
 
     let start = gen_keypairs.len() - (tx_count * 2) as usize;
     let keypairs = &gen_keypairs[start..];
+
+    let program_id = if USE_MOVE {
+        Pubkey::default()
+    } else {
+        Pubkey::default()
+    };
 
     let first_tx_count = client.get_transaction_count().expect("transaction count");
     println!("Initial transaction count {}", first_tx_count);
@@ -165,6 +176,7 @@ where
             &keypairs[len..],
             threads,
             reclaim_lamports_back_to_source_account,
+            &program_id,
         );
         // In sustained mode overlap the transfers with generation
         // this has higher average performance but lower peak performance
@@ -228,6 +240,7 @@ fn generate_txs(
     dest: &[Keypair],
     threads: usize,
     reclaim: bool,
+    program_id: &Pubkey,
 ) {
     let tx_count = source.len();
     println!("Signing transactions... {} (reclaim={})", tx_count, reclaim);
@@ -241,10 +254,23 @@ fn generate_txs(
     let transactions: Vec<_> = pairs
         .par_iter()
         .map(|(id, keypair)| {
-            (
-                system_transaction::create_user_account(id, &keypair.pubkey(), 1, *blockhash),
-                timestamp(),
-            )
+            if USE_MOVE {
+                (
+                    librapay_transaction::payment(
+                        program_id,
+                        &id,
+                        &keypair.pubkey(),
+                        1,
+                        *blockhash,
+                    ),
+                    timestamp(),
+                )
+            } else {
+                (
+                    system_transaction::create_user_account(id, &keypair.pubkey(), 1, *blockhash),
+                    timestamp(),
+                )
+            }
         })
         .collect();
 
@@ -695,7 +721,7 @@ mod tests {
 
         let mut config = Config::default();
         config.tx_count = 100;
-        config.duration = Duration::from_secs(5);
+        config.duration = Duration::from_secs(10);
 
         let client = create_client(
             (cluster.entry_point_info.rpc, cluster.entry_point_info.tpu),
