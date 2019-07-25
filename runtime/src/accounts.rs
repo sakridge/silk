@@ -107,9 +107,9 @@ impl Accounts {
             if called_accounts.is_empty() || called_accounts[0].lamports == 0 {
                 error_counters.account_not_found += 1;
                 Err(TransactionError::AccountNotFound)
-            } else if called_accounts[0].owner != system_program::id() {
+            /*} else if called_accounts[0].owner != system_program::id() {
                 error_counters.invalid_account_for_fee += 1;
-                Err(TransactionError::InvalidAccountForFee)
+                Err(TransactionError::InvalidAccountForFee)*/
             } else if called_accounts[0].lamports < fee {
                 error_counters.insufficient_funds += 1;
                 Err(TransactionError::InsufficientFundsForFee)

@@ -35,6 +35,7 @@ pub struct ValidatorInfo {
     pub keypair: Arc<Keypair>,
     pub voting_keypair: Arc<Keypair>,
     pub storage_keypair: Arc<Keypair>,
+    pub libra_mint_keypair: Arc<Keypair>,
     pub ledger_path: String,
     pub contact_info: ContactInfo,
 }
@@ -163,6 +164,11 @@ impl LocalCluster {
             storage_keypair.pubkey(),
             storage_contract::create_validator_storage_account(leader_pubkey, 1),
         ));
+        let libra_mint_keypair = Keypair::new();
+        genesis_block.accounts.push((
+            libra_mint_keypair.pubkey(),
+            storage_contract::create_validator_storage_account(leader_pubkey, 1),
+        ));
         genesis_block
             .native_instruction_processors
             .push(solana_storage_program!());
@@ -173,6 +179,7 @@ impl LocalCluster {
         let (leader_ledger_path, _blockhash) = create_new_tmp_ledger!(&genesis_block);
         let leader_contact_info = leader_node.info.clone();
         let leader_storage_keypair = Arc::new(storage_keypair);
+        let libra_mint_keypair = Arc::new(libra_mint_keypair);
         let leader_voting_keypair = Arc::new(voting_keypair);
         let leader_server = Validator::new(
             leader_node,
@@ -193,6 +200,7 @@ impl LocalCluster {
             keypair: leader_keypair,
             voting_keypair: leader_voting_keypair,
             storage_keypair: leader_storage_keypair,
+            libra_mint_keypair,
             ledger_path: leader_ledger_path,
             contact_info: leader_contact_info.clone(),
         };
@@ -272,6 +280,7 @@ impl LocalCluster {
         let validator_keypair = Arc::new(Keypair::new());
         let voting_keypair = Keypair::new();
         let storage_keypair = Arc::new(Keypair::new());
+        let libra_mint_keypair = Arc::new(Keypair::new());
         let validator_pubkey = validator_keypair.pubkey();
         let validator_node = Node::new_localhost_with_pubkey(&validator_keypair.pubkey());
         let contact_info = validator_node.info.clone();
@@ -326,6 +335,7 @@ impl LocalCluster {
                 keypair: validator_keypair,
                 voting_keypair,
                 storage_keypair,
+                libra_mint_keypair,
                 ledger_path,
                 contact_info,
             },
