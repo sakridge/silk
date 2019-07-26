@@ -13,6 +13,7 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
 use std::process::exit;
+use std::sync::Arc;
 
 /// Number of signatures for all transactions in ~1 week at ~100K TPS
 pub const NUM_SIGNATURES_FOR_TXS: u64 = 100_000 * 60 * 60 * 24 * 7;
@@ -106,6 +107,7 @@ fn main() {
             NUM_LAMPORTS_PER_ACCOUNT,
             &Pubkey::default(),
             &Pubkey::default(),
+            &Arc::new(Keypair::new()),
         )
         .unwrap_or_else(|e| {
             eprintln!("Error could not fund keys: {:?}", e);
