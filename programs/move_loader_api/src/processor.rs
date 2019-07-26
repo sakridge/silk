@@ -250,6 +250,7 @@ impl MoveProcessor {
             return Err(InstructionError::InvalidArgument);
         }
 
+        let mut deserialize_time = Measure("deserialize");
         let invoke_info: InvokeInfo = bincode::deserialize(&data).map_err(Self::map_data_error)?;
 
         let program = match bincode::deserialize(&keyed_accounts[0].account.data)
@@ -263,7 +264,9 @@ impl MoveProcessor {
         };
 
         let mut data_store = Self::keyed_accounts_to_data_store(&keyed_accounts[GENESIS_INDEX..])?;
+        deserialize_time.stop();
 
+        let mut verify_time = Measure("verify");
         let (compiled_script, compiled_modules) = Self::deserialize_program(&program)?;
         let (script, modules) = static_verify_program(
             &invoke_info.sender_address,
@@ -271,7 +274,11 @@ impl MoveProcessor {
             compiled_modules,
         )
         .map_err(Self::map_vm_verification_error)?;
+        verify_time.stop();
+        let mut execute_time = Measure("execute");
         let output = Self::execute(invoke_info, script, modules, &data_store)?;
+        execute_time.stop();
+        let mut data_store_time = Measure("data_store");
         for event in output.events() {
             trace!("Event: {:?}", event);
         }
@@ -291,7 +298,9 @@ impl MoveProcessor {
         let writer = std::io::BufWriter::new(&mut keyed_accounts[GENESIS_INDEX].account.data);
         bincode::serialize_into(writer, &LibraAccountState::Genesis(write_set))
             .map_err(Self::map_data_error)?;
+        data_store_time.stop();
 
+        let mut keyed_accounts_time = Measure::start("keyed_accounts_time");
         // Now do the rest of the accounts
         for keyed_account in keyed_accounts[GENESIS_INDEX + 1..].iter_mut() {
             let write_set = write_sets
@@ -306,6 +315,7 @@ impl MoveProcessor {
             debug!("Error: Missing keyed accounts");
             return Err(InstructionError::GenericError);
         }
+        keyed_acounts_time.stop();
         Ok(())
     }
 }

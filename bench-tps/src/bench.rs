@@ -38,7 +38,7 @@ pub enum BenchTpsError {
     AirdropFailure,
 }
 
-const USE_MOVE: bool = false;
+const USE_MOVE: bool = true;
 
 pub type Result<T> = std::result::Result<T, BenchTpsError>;
 
@@ -290,12 +290,14 @@ fn generate_txs(
     let ns = duration.as_secs() * 1_000_000_000 + u64::from(duration.subsec_nanos());
     let bsps = (tx_count) as f64 / ns as f64;
     let nsps = ns as f64 / (tx_count) as f64;
+    let tx_size = bincode::serialized_size(&transactions[0]).unwrap();
     println!(
-        "Done. {:.2} thousand signatures per second, {:.2} us per signature, {} ms total time, {}",
+        "Done. {:.2} thousand signatures per second, {:.2} us per signature, {} ms total time, {} tx_size: {}",
         bsps * 1_000_000_f64,
         nsps / 1_000_f64,
         duration_as_ms(&duration),
         blockhash,
+        tx_size,
     );
     datapoint_info!(
         "bench-tps-generate_txs",
@@ -856,7 +858,7 @@ mod tests {
         let drone_addr = addr_receiver.recv_timeout(Duration::from_secs(2)).unwrap();
 
         let mut config = Config::default();
-        config.tx_count = 8192;
+        config.tx_count = 1024;
         config.duration = Duration::from_secs(30);
 
         let lamports_per_account = 100;

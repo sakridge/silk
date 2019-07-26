@@ -1016,7 +1016,7 @@ impl Bank {
 
         execution_time.stop();
 
-        debug!(
+        info!(
             "load: {}us execute: {}us txs_len={}",
             load_time.as_us(),
             execution_time.as_us(),
@@ -1040,7 +1040,7 @@ impl Bank {
             }
         }
         if err_count > 0 {
-            info!("{} errors of {} txs", err_count, err_count + tx_count);
+            debug!("{} errors of {} txs", err_count, err_count + tx_count);
             inc_new_counter_error!(
                 "bank-process_transactions-account_not_found",
                 error_counters.account_not_found,
