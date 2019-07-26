@@ -8,9 +8,11 @@ use solana_sdk::hash::Hash;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, KeypairUtil};
 use solana_sdk::system_transaction;
+use solana_sdk::system_instruction;
 use solana_sdk::transaction::Transaction;
 use std::boxed::Box;
 use std::error;
+use solana_sdk::account::Account;
 
 pub fn mint_tokens(
     program_id: &Pubkey,
@@ -47,6 +49,18 @@ pub fn transfer(
     )
 }
 
+pub fn create_accounts(
+    from: &Keypair,
+    tos: &[Pubkey],
+    lamports: u64,
+    recent_blockhash: Hash,
+) -> Transaction {
+    let instructions = tos.iter().map(|to|
+        system_instruction::create_account(&from.pubkey(), to, lamports, 128, &solana_move_loader_api::id())).collect();
+    Transaction::new_signed_instructions(&[from], instructions, recent_blockhash)
+}
+
+
 pub fn create_account(
     from: &Keypair,
     to: &Pubkey,
@@ -72,10 +86,13 @@ pub fn get_libra_balance<T: Client>(
         let mut data_store = DataStore::default();
         match bincode::deserialize(&account).unwrap() {
             LibraAccountState::User(write_set) => {
-                info!("address: {} write_set: {:?}", account_address, write_set);
+                info!("address: {}", account_address);
                 data_store.apply_write_set(&write_set);
-            }
-            _ => panic!("Invalid account state"),
+            },
+            LibraAccountState::Unallocated => {
+                return Ok(0);
+            },
+            x => panic!("Invalid account state: {:?}", x),
         }
         let resource = data_store
             .read_account_resource(&pubkey_to_address(account_address))
@@ -87,6 +104,17 @@ pub fn get_libra_balance<T: Client>(
     } else {
         info!("no account data");
         Ok(0)
+    }
+}
+
+pub fn create_libra_genesis_account(microlibras: u64) -> Account {
+    let libra_genesis_data =
+        bincode::serialize(&LibraAccountState::create_genesis(microlibras)).unwrap();
+    Account {
+        lamports: 1,
+        data: libra_genesis_data,
+        owner: solana_move_loader_api::id(),
+        executable: false,
     }
 }
 
@@ -103,15 +131,7 @@ mod tests {
     use std::sync::Arc;
 
     fn create_bank(lamports: u64) -> (Arc<Bank>, Keypair, Keypair, Pubkey, Pubkey) {
-        let libra_genesis_data =
-            bincode::serialize(&LibraAccountState::create_genesis(lamports)).unwrap();
-        let libra_genesis_account = Account {
-            lamports: 1,
-            data: libra_genesis_data,
-            owner: solana_move_loader_api::id(),
-            executable: false,
-        };
-
+        let libra_genesis_account = create_libra_genesis_account(lamports);
         //let (genesis_block, mint_keypair) = create_genesis_block(lamports);
         let mint_keypair = Keypair::new();
         let libra_mint_keypair = Keypair::new();

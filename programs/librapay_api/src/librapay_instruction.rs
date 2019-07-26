@@ -27,7 +27,7 @@ pub fn mint(
     let ix_data = LoaderInstruction::InvokeMain { data };
 
     let accounts = vec![
-        AccountMeta::new(*program_id, false),
+        AccountMeta::new_credit_only(*program_id, false),
         AccountMeta::new(*from_pubkey, true),
         AccountMeta::new(*to_pubkey, false),
     ];
@@ -56,7 +56,7 @@ pub fn transfer(
     let ix_data = LoaderInstruction::InvokeMain { data };
 
     let accounts = vec![
-        AccountMeta::new(*program_id, false),
+        AccountMeta::new_credit_only(*program_id, false),
         AccountMeta::new_credit_only(*mint_pubkey, false),
         AccountMeta::new(*from_pubkey, true),
         AccountMeta::new(*to_pubkey, false),
