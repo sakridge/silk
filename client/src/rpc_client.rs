@@ -364,7 +364,7 @@ impl RpcClient {
                     return Ok((new_blockhash, fee_calculator));
                 }
             }
-            debug!("Got same blockhash ({:?}), will retry...", blockhash);
+            info!("Got same blockhash ({:?}), will retry...", blockhash);
 
             // Retry ~twice during a slot
             sleep(Duration::from_millis(
@@ -431,7 +431,7 @@ impl RpcClient {
     pub fn poll_for_signature(&self, signature: &Signature) -> io::Result<()> {
         let now = Instant::now();
         while !self.check_signature(signature) {
-            if now.elapsed().as_secs() > 15 {
+            if now.elapsed().as_secs() > 3 {
                 // TODO: Return a better error.
                 return Err(io::Error::new(io::ErrorKind::Other, "signature not found"));
             }
