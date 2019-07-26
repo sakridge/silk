@@ -366,14 +366,14 @@ impl Accounts {
                     .map_or(false, |lock| *lock.lock_count.lock().unwrap() > 0)
             {
                 error_counters.account_in_use += 1;
-                debug!("Account in use: {:?}", k);
+                debug!("credit_debit Account in use: {:?} len: {}", k, credit_debit_keys.len());
                 return Err(TransactionError::AccountInUse);
             }
         }
         for k in credit_only_keys.iter() {
             if locks.contains(k) {
                 error_counters.account_in_use += 1;
-                debug!("Account in use: {:?}", k);
+                debug!("credit_only Account in use: {:?} len: {}", k, credit_only_keys.len());
                 return Err(TransactionError::AccountInUse);
             }
         }

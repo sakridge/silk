@@ -987,6 +987,20 @@ impl Bank {
 
         let mut execution_time = Measure::start("execution_time");
         let mut signature_count = 0;
+        let votes: Vec<_> = loaded_accounts.iter().map(|accs|
+         {
+            let mut is_vote = false;
+            for (accounts, _loaders, _credits) in accs {
+                for acc in accounts {
+                    if Stakes::is_stake(acc) {
+                        is_vote = true;
+                        break;
+                    }
+                }
+            }
+            is_vote
+         }).collect();
+
         let executed: Vec<Result<()>> = loaded_accounts
             .iter_mut()
             .zip(txs.iter())
@@ -1009,13 +1023,18 @@ impl Bank {
             txs.len(),
         );
         let mut tx_count = 0;
+        let mut tx_count_non_vote = 0;
         let mut err_count = 0;
-        for (r, tx) in executed.iter().zip(txs.iter()) {
+        for ((r, tx), is_vote) in executed.iter().zip(txs.iter()).zip(votes.iter()) {
             if r.is_ok() {
                 tx_count += 1;
+                if !is_vote {
+                    debug!("non-vote tx: {:?}", tx.signatures[0]);
+                    tx_count_non_vote += 1;
+                }
             } else {
                 if err_count == 0 {
-                    info!("tx error: {:?} {:?}", r, tx);
+                    debug!("tx error: {:?} {:?}", r, tx);
                 }
                 err_count += 1;
             }

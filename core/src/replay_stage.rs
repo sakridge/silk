@@ -120,6 +120,7 @@ impl ReplayStage {
                         break;
                     }
 
+                    info!("generate_new_bank_forks");
                     Self::generate_new_bank_forks(
                         &blocktree,
                         &mut bank_forks.write().unwrap(),
@@ -128,6 +129,7 @@ impl ReplayStage {
 
                     let mut tpu_has_bank = poh_recorder.lock().unwrap().has_bank();
 
+                    info!("tpu_has_bank {}", tpu_has_bank);
                     let did_complete_bank = Self::replay_active_banks(
                         &blocktree,
                         &bank_forks,
@@ -139,6 +141,7 @@ impl ReplayStage {
                     let votable = Self::generate_votable_banks(&bank_forks, &tower, &mut progress);
 
                     if let Some((_, bank)) = votable.last() {
+                        info!("has_votable {}", bank.slot());
                         subscriptions.notify_subscribers(bank.slot(), &bank_forks);
 
                         if let Some(new_leader) =
@@ -152,6 +155,7 @@ impl ReplayStage {
                             );
                         }
 
+                        info!("handle_votable");
                         Self::handle_votable_bank(
                             &bank,
                             &bank_forks,
@@ -165,6 +169,7 @@ impl ReplayStage {
                             &root_bank_sender,
                         )?;
 
+                        info!("reset_poh_recorder");
                         Self::reset_poh_recorder(
                             &my_pubkey,
                             &blocktree,
@@ -175,6 +180,7 @@ impl ReplayStage {
                         tpu_has_bank = false;
                     }
 
+                    info!("done votable: {}", tpu_has_bank);
                     if !tpu_has_bank {
                         Self::maybe_start_leader(
                             &my_pubkey,
@@ -183,6 +189,7 @@ impl ReplayStage {
                             &leader_schedule_cache,
                         );
 
+                        info!("poh recorder lock");
                         if let Some(bank) = poh_recorder.lock().unwrap().bank() {
                             Self::log_leader_change(
                                 &my_pubkey,
@@ -193,6 +200,7 @@ impl ReplayStage {
                         }
                     }
 
+                    info!("replay done.");
                     inc_new_counter_info!(
                         "replicate_stage-duration",
                         duration_as_ms(&now.elapsed()) as usize
@@ -248,16 +256,17 @@ impl ReplayStage {
         // all the individual calls to poh_recorder.lock() are designed to
         // increase granularity, decrease contention
 
+        info!("maybe_start_leader");
         assert!(!poh_recorder.lock().unwrap().has_bank());
 
         let (reached_leader_tick, grace_ticks, poh_slot, parent_slot) =
             poh_recorder.lock().unwrap().reached_leader_tick();
 
         if !reached_leader_tick {
-            trace!("{} poh_recorder hasn't reached_leader_tick", my_pubkey);
+            info!("{} poh_recorder hasn't reached_leader_tick", my_pubkey);
             return;
         }
-        trace!("{} reached_leader_tick", my_pubkey,);
+        info!("{} reached_leader_tick", my_pubkey,);
 
         let parent = bank_forks
             .read()
@@ -272,7 +281,7 @@ impl ReplayStage {
             warn!("{} already have bank in forks at {}?", my_pubkey, poh_slot);
             return;
         }
-        trace!(
+        info!(
             "{} poh_slot {} parent_slot {}",
             my_pubkey,
             poh_slot,
@@ -280,7 +289,7 @@ impl ReplayStage {
         );
 
         if let Some(next_leader) = leader_schedule_cache.slot_leader_at(poh_slot, Some(&parent)) {
-            trace!(
+            info!(
                 "{} leader {} at poh slot: {}",
                 my_pubkey,
                 next_leader,
@@ -298,11 +307,13 @@ impl ReplayStage {
                 ("grace", grace_ticks, i64)
             );
 
+            info!("new_from_parent");
             let tpu_bank = bank_forks
                 .write()
                 .unwrap()
                 .insert(Bank::new_from_parent(&parent, my_pubkey, poh_slot));
 
+            info!("set_bank");
             poh_recorder.lock().unwrap().set_bank(&tpu_bank);
         } else {
             error!("{} No next leader found", my_pubkey);

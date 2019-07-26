@@ -163,7 +163,7 @@ impl MoveProcessor {
         txn_metadata.max_gas_amount = *MAXIMUM_NUMBER_OF_GAS_UNITS;
         txn_metadata.gas_unit_price = *MAX_PRICE_PER_GAS_UNIT;
 
-        info!("execute: args: {:?}", invoke_info);
+        debug!("execute: args: {:?}", invoke_info);
         let mut vm = TransactionExecutor::new(&module_cache, data_store, txn_metadata);
         vm.execute_function(
             &module_id,
@@ -183,7 +183,7 @@ impl MoveProcessor {
     ) -> Result<DataStore, InstructionError> {
         let mut data_store = DataStore::default();
         for keyed_account in keyed_accounts {
-            info!("account: {:?}", keyed_account);
+            debug!("account: {:?}", keyed_account);
             match bincode::deserialize(&keyed_account.account.data).map_err(Self::map_data_error)? {
                 LibraAccountState::Genesis(write_set) | LibraAccountState::User(write_set) => {
                     data_store.apply_write_set(&write_set)
