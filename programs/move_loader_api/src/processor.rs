@@ -1,4 +1,5 @@
 use crate::account_state::{pubkey_to_address, LibraAccountState};
+use solana_measure::measure::Measure;
 use crate::data_store::DataStore;
 use crate::id;
 use bytecode_verifier::{VerifiedModule, VerifiedScript};
@@ -250,7 +251,7 @@ impl MoveProcessor {
             return Err(InstructionError::InvalidArgument);
         }
 
-        let mut deserialize_time = Measure("deserialize");
+        let mut deserialize_time = Measure::start("deserialize");
         let invoke_info: InvokeInfo = bincode::deserialize(&data).map_err(Self::map_data_error)?;
 
         let program = match bincode::deserialize(&keyed_accounts[0].account.data)
@@ -266,7 +267,7 @@ impl MoveProcessor {
         let mut data_store = Self::keyed_accounts_to_data_store(&keyed_accounts[GENESIS_INDEX..])?;
         deserialize_time.stop();
 
-        let mut verify_time = Measure("verify");
+        let mut verify_time = Measure::start("verify");
         let (compiled_script, compiled_modules) = Self::deserialize_program(&program)?;
         let (script, modules) = static_verify_program(
             &invoke_info.sender_address,
@@ -275,10 +276,10 @@ impl MoveProcessor {
         )
         .map_err(Self::map_vm_verification_error)?;
         verify_time.stop();
-        let mut execute_time = Measure("execute");
+        let mut execute_time = Measure::start("execute");
         let output = Self::execute(invoke_info, script, modules, &data_store)?;
         execute_time.stop();
-        let mut data_store_time = Measure("data_store");
+        let mut data_store_time = Measure::start("data_store");
         for event in output.events() {
             trace!("Event: {:?}", event);
         }
@@ -315,7 +316,7 @@ impl MoveProcessor {
             debug!("Error: Missing keyed accounts");
             return Err(InstructionError::GenericError);
         }
-        keyed_acounts_time.stop();
+        keyed_accounts_time.stop();
         Ok(())
     }
 }

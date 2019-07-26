@@ -25,7 +25,7 @@ use types::account_address::AccountAddress;
 
 pub fn upload_move_program<T: Client>(from: &Keypair, client: &T, code: &str) -> Pubkey {
     let address = AccountAddress::default();
-    let account_state = LibraAccountState::create_program(&address, code);
+    let account_state = LibraAccountState::create_program(&address, code, vec![]);
     let program_bytes = bincode::serialize(&account_state).unwrap();
 
     load_program(client, &from, &solana_move_loader_api::id(), program_bytes)

@@ -16,3 +16,4 @@ libc = "0.2.58"
 
 [features]
 nvtx = []
+default = ["nvtx"]
