@@ -30,12 +30,12 @@ use std::io::{Error, ErrorKind, Result};
 use std::sync::Arc;
 
 use solana_move_loader_api;
+use solana_librapay_api::librapay_transaction;
 
 pub struct ValidatorInfo {
     pub keypair: Arc<Keypair>,
     pub voting_keypair: Arc<Keypair>,
     pub storage_keypair: Arc<Keypair>,
-    pub libra_mint_keypair: Arc<Keypair>,
     pub ledger_path: String,
     pub contact_info: ContactInfo,
 }
@@ -118,6 +118,7 @@ pub struct LocalCluster {
     pub genesis_block: GenesisBlock,
     replicators: Vec<Replicator>,
     pub replicator_infos: HashMap<Pubkey, ReplicatorInfo>,
+    pub libra_mint_keypair: Arc<Keypair>,
 }
 
 impl LocalCluster {
@@ -167,7 +168,7 @@ impl LocalCluster {
         let libra_mint_keypair = Keypair::new();
         genesis_block.accounts.push((
             libra_mint_keypair.pubkey(),
-            storage_contract::create_validator_storage_account(leader_pubkey, 1),
+            librapay_transaction::create_libra_genesis_account(10_000),
         ));
         genesis_block
             .native_instruction_processors
@@ -200,7 +201,6 @@ impl LocalCluster {
             keypair: leader_keypair,
             voting_keypair: leader_voting_keypair,
             storage_keypair: leader_storage_keypair,
-            libra_mint_keypair,
             ledger_path: leader_ledger_path,
             contact_info: leader_contact_info.clone(),
         };
@@ -219,6 +219,7 @@ impl LocalCluster {
             fullnode_infos,
             replicator_infos: HashMap::new(),
             listener_infos: HashMap::new(),
+            libra_mint_keypair,
         };
 
         for (stake, validator_config) in (&config.node_stakes[1..])
@@ -280,7 +281,6 @@ impl LocalCluster {
         let validator_keypair = Arc::new(Keypair::new());
         let voting_keypair = Keypair::new();
         let storage_keypair = Arc::new(Keypair::new());
-        let libra_mint_keypair = Arc::new(Keypair::new());
         let validator_pubkey = validator_keypair.pubkey();
         let validator_node = Node::new_localhost_with_pubkey(&validator_keypair.pubkey());
         let contact_info = validator_node.info.clone();
@@ -335,7 +335,6 @@ impl LocalCluster {
                 keypair: validator_keypair,
                 voting_keypair,
                 storage_keypair,
-                libra_mint_keypair,
                 ledger_path,
                 contact_info,
             },
