@@ -697,7 +697,7 @@ fn fund_move_keys<T: Client>(
 ) {
     let (mut blockhash, _fee_calculator) = client.get_recent_blockhash().unwrap();
 
-    info!("creating the libra funding account..");
+    info!("creating the libra funding account.. fees: {:?}", _fee_calculator);
     let libra_funding_key = Keypair::new();
     let tx = librapay_transaction::create_account(
         funding_key,
@@ -758,19 +758,33 @@ fn fund_move_keys<T: Client>(
         }
     }
     funding_time.stop();
-    info!("funding accounts {}ms", funding_time.as_ms());
+    let amount = total / (NUM_FUNDING_KEYS as u64);
+    info!("funding accounts {}ms {:?} amount: {}", funding_time.as_ms(), client.get_balance(&funding_key.pubkey()), amount);
     //let mut sigs = vec![];
 
     const NUM_FUNDING_KEYS: usize = 4;
     let funding_keys: Vec<_> = (0..NUM_FUNDING_KEYS).map(|_| Keypair::new()).collect();
-    let pubkey_amounts: Vec<_> = funding_keys.iter().map(|key| (key.pubkey(), total / NUM_FUNDING_KEYS as u64)).collect();
+    let pubkey_amounts: Vec<_> = funding_keys.iter().map(|key| (key.pubkey(), amount)).collect();
     let tx = Transaction::new_signed_instructions(
         &[funding_key], system_instruction::transfer_many(&funding_key.pubkey(), &pubkey_amounts), blockhash
     );
     let sig = client.async_send_transaction(tx).expect("transfer");
-    client.poll_for_signature(&sig).unwrap();
+    info!("source: {} sig: {}", funding_key.pubkey(), sig);
+    let res = client.poll_for_signature(&sig).unwrap();
 
-    info!("funded multiple funding accounts.. {:?}", client.get_balance(&funding_keys[0].pubkey()));
+    info!("poll: {:?}", res);
+
+    info!("funded multiple funding accounts.. src: {:?} dest: {:?}",
+        client.get_balance(&funding_key.pubkey()),
+        client.get_balance(&funding_keys[0].pubkey()),
+    );
+    loop {
+        if client.get_balance(&funding_keys[0].pubkey()).is_ok() {
+            break;
+        } else {
+            sleep(Duration::from_millis(200));
+        }
+    }
 
     let libra_funding_keys: Vec<_> = (0..NUM_FUNDING_KEYS).map(|_| Keypair::new()).collect();
     for (i, key) in libra_funding_keys.iter().enumerate() {
@@ -1046,9 +1060,10 @@ mod tests {
     #[test]
     fn test_bench_tps_local_cluster_move() {
         let mut config = Config::default();
-        config.tx_count = 1024;
+        config.tx_count = 4096;
         config.duration = Duration::from_secs(60);
         config.use_move = true;
+        config.thread_batch_sleep_ms = 40;
 
         test_bench_tps_local_cluster(config);
     }

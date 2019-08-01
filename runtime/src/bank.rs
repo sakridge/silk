@@ -1029,15 +1029,18 @@ impl Bank {
         for (r, tx) in executed.iter().zip(txs.iter()) {
             if r.is_ok() {
                 tx_count += 1;
+                /*if !solana_vote_api::check_id(&tx.message().program_ids()[0]) {
+                    info!("tx: {:?}", tx);
+                }*/
             } else {
                 if err_count == 0 {
-                    debug!("tx error: {:?} {:?}", r, tx);
+                    info!("tx error: {:?} {:?}", r, tx);
                 }
                 err_count += 1;
             }
         }
         if err_count > 0 {
-            debug!("{} errors of {} txs", err_count, err_count + tx_count);
+            info!("{} errors of {} txs", err_count, err_count + tx_count);
             inc_new_counter_error!(
                 "bank-process_transactions-account_not_found",
                 error_counters.account_not_found,

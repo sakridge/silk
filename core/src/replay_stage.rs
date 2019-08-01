@@ -505,7 +505,7 @@ impl ReplayStage {
             "I am not in the upcoming leader schedule yet".to_owned()
         };
 
-        info!(
+        debug!(
             "{} voted and reset poh at {}. {}",
             my_pubkey,
             bank.tick_height(),
@@ -625,7 +625,7 @@ impl ReplayStage {
         trace!("votable_banks {}", votable.len());
         if !votable.is_empty() {
             let weights: Vec<u128> = votable.iter().map(|x| x.0).collect();
-            info!(
+            debug!(
                 "@{:?} tower duration: {:?} len: {} weights: {:?}",
                 timing::timestamp(),
                 ms,
@@ -739,7 +739,7 @@ impl ReplayStage {
         slot_full_senders: &[Sender<(u64, Pubkey)>],
     ) {
         bank.freeze();
-        info!("bank frozen {}", bank.slot());
+        debug!("bank frozen {}", bank.slot());
         slot_full_senders.iter().for_each(|sender| {
             if let Err(e) = sender.send((bank.slot(), *bank.collector_id())) {
                 trace!("{} slot_full alert failed: {:?}", my_pubkey, e);
