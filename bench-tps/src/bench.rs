@@ -1046,8 +1046,8 @@ mod tests {
     #[test]
     fn test_bench_tps_local_cluster_move() {
         let mut config = Config::default();
-        config.tx_count = 100;
-        config.duration = Duration::from_secs(20);
+        config.tx_count = 1024;
+        config.duration = Duration::from_secs(60);
         config.use_move = true;
 
         test_bench_tps_local_cluster(config);
