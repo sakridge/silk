@@ -759,43 +759,76 @@ fn fund_move_keys<T: Client>(
     }
     funding_time.stop();
     info!("funding accounts {}ms", funding_time.as_ms());
-    let mut sigs = vec![];
+    //let mut sigs = vec![];
+
+    const NUM_FUNDING_KEYS: usize = 4;
+    let funding_keys: Vec<_> = (0..NUM_FUNDING_KEYS).map(|_| Keypair::new()).collect();
+    let pubkey_amounts: Vec<_> = funding_keys.iter().map(|key| (key.pubkey(), total / NUM_FUNDING_KEYS as u64)).collect();
+    let tx = Transaction::new_signed_instructions(
+        &[funding_key], system_instruction::transfer_many(&funding_key.pubkey(), &pubkey_amounts), blockhash
+    );
+    let sig = client.async_send_transaction(tx).expect("transfer");
+    client.poll_for_signature(&sig).unwrap();
+
+    info!("funded multiple funding accounts.. {}", client.get_balance(&funding_keys[0].pubkey()).unwrap());
+
     let tx_count = keypairs.len();
     let amount = total / (tx_count as u64);
-    for (i, key) in keypairs[..tx_count].iter().enumerate() {
-        let tx = librapay_transaction::transfer(
-            libra_pay_program_id,
-            &libra_mint_key.pubkey(),
-            funding_key,
-            &libra_funding_key,
-            &key.pubkey(),
-            amount,
-            blockhash,
-        );
+    for (i, keys) in keypairs[..tx_count].chunks(NUM_FUNDING_KEYS).enumerate() {
+        for (j, key) in keys.iter().enumerate() {
+            let tx = librapay_transaction::transfer(
+                libra_pay_program_id,
+                &libra_mint_key.pubkey(),
+                &funding_keys[j],
+                &libra_funding_key,
+                &key.pubkey(),
+                amount,
+                blockhash,
+            );
 
-        let sig = client
-            .async_send_transaction(tx.clone())
-            .expect("create_account in generate_and_fund_keypairs");
+            let _sig = client
+                .async_send_transaction(tx.clone())
+                .expect("create_account in generate_and_fund_keypairs");
 
-        let mut poll_time = Measure::start("poll_start");
-        let poll_status = client.poll_for_signature(&sig);
-        poll_time.stop();
-        info!(
-            "i: {} poll: {:?} time: {}ms",
-            i,
-            poll_status,
-            poll_time.as_ms()
-        );
+            /*let mut poll_time = Measure::start("poll_start");
+            let poll_status = client.poll_for_signature(&sig);
+            poll_time.stop();
+            info!(
+                "i: {} poll: {:?} time: {}ms",
+                i,
+                poll_status,
+                poll_time.as_ms()
+            );*/
+        }
 
-        sigs.push((sig, key));
+        info!("sent... checking balance {}", i);
+        for key in keys {
+            let mut times = 0;
+            loop {
+                let balance = librapay_transaction::get_libra_balance(client, &key.pubkey()).unwrap();
+                if balance > amount {
+                    break;
+                } else if times > 20 {
+                    info!("timed out.. {}", i);
+                    break;
+                } else {
+                    times += 1;
+                    sleep(Duration::from_millis(100));
+                }
+            }
 
-        if i % 50 == 0 {
+            //sigs.push(key);
+        }
+
+        //if i % 10 == 0 {
+        {
+            info!("funded: {} of ", i);
             blockhash = client.get_recent_blockhash().unwrap().0;
         }
     }
 
-    for (i, (sig, key)) in sigs.iter().enumerate() {
-        let mut times = 0;
+    /*let mut times = 0;
+    for (i, key) in sigs.iter().enumerate() {
         loop {
             match client.poll_for_signature(&sig) {
                 Ok(_) => {
@@ -809,20 +842,12 @@ fn fund_move_keys<T: Client>(
             }
         }
         times = 0;
-        loop {
-            let balance = librapay_transaction::get_libra_balance(client, &key.pubkey()).unwrap();
-            if balance < amount {
-                info!("i: {} balance: {} times: {}", i, balance, times);
-                times += 1;
-                sleep(Duration::from_secs(1));
-            } else {
-                break;
-            }
+        let balance = librapay_transaction::get_libra_balance(client, &key.pubkey()).unwrap();
+        if balance < amount {
+            info!("i: {} balance: {} times: {}", i, balance, times);
+            times += 1;
         }
-        if i % 10 == 0 {
-            info!("funding {} of {}", i, tx_count);
-        }
-    }
+    }*/
     info!("done..");
 }
 
