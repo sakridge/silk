@@ -6,10 +6,11 @@ use log::*;
 use serde_derive::{Deserialize, Serialize};
 use solana_sdk::account::{Account, KeyedAccount};
 use solana_sdk::account_utils::State;
-use solana_sdk::hash::Hash;
+use solana_sdk::hash::BankHash;
 use solana_sdk::instruction::InstructionError;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::sysvar::clock::Clock;
+use solana_sdk::sysvar::slot_hashes::SlotHash;
 pub use solana_sdk::timing::{Epoch, Slot};
 use std::collections::VecDeque;
 
@@ -26,11 +27,11 @@ pub struct Vote {
     /// A vote for height slot
     pub slot: Slot,
     // signature of the bank's state at given slot
-    pub hash: Hash,
+    pub hash: BankHash,
 }
 
 impl Vote {
-    pub fn new(slot: Slot, hash: Hash) -> Self {
+    pub fn new(slot: Slot, hash: BankHash) -> Self {
         Self { slot, hash }
     }
 }
@@ -148,13 +149,13 @@ impl VoteState {
         }
     }
 
-    pub fn process_votes(&mut self, votes: &[Vote], slot_hashes: &[(Slot, Hash)], epoch: Epoch) {
+    pub fn process_votes(&mut self, votes: &[Vote], slot_hashes: &[SlotHash], epoch: Epoch) {
         votes
             .iter()
             .for_each(|v| self.process_vote(v, slot_hashes, epoch));
     }
 
-    pub fn process_vote(&mut self, vote: &Vote, slot_hashes: &[(Slot, Hash)], epoch: Epoch) {
+    pub fn process_vote(&mut self, vote: &Vote, slot_hashes: &[SlotHash], epoch: Epoch) {
         // Ignore votes for slots earlier than we already have votes for
         if self
             .votes
@@ -229,7 +230,7 @@ impl VoteState {
         self.process_vote(vote, &[(vote.slot, vote.hash)], self.epoch);
     }
     pub fn process_slot_vote_unchecked(&mut self, slot: Slot) {
-        self.process_vote_unchecked(&Vote::new(slot, Hash::default()));
+        self.process_vote_unchecked(&Vote::new(slot, BankHash::default()));
     }
 
     pub fn nth_recent_vote(&self, position: usize) -> Option<&Lockout> {
@@ -339,7 +340,7 @@ pub fn initialize_account(
 
 pub fn process_votes(
     vote_account: &mut KeyedAccount,
-    slot_hashes: &[(Slot, Hash)],
+    slot_hashes: &[SlotHash],
     clock: &Clock,
     other_signers: &[KeyedAccount],
     votes: &[Vote],
@@ -419,7 +420,7 @@ mod tests {
         vote_pubkey: &Pubkey,
         vote_account: &mut Account,
         vote: &Vote,
-        slot_hashes: &[(u64, Hash)],
+        slot_hashes: &[SlotHash],
         epoch: u64,
     ) -> Result<VoteState, InstructionError> {
         process_votes(
@@ -475,7 +476,7 @@ mod tests {
     fn test_vote() {
         let (vote_pubkey, mut vote_account) = create_test_account();
 
-        let vote = Vote::new(1, Hash::default());
+        let vote = Vote::new(1, BankHash::default());
         let vote_state =
             simulate_process_vote_unchecked(&vote_pubkey, &mut vote_account, &vote).unwrap();
         assert_eq!(vote_state.votes, vec![Lockout::new(&vote)]);
@@ -494,7 +495,7 @@ mod tests {
             &vote_pubkey,
             &mut vote_account,
             &vote,
-            &[(0, Hash::default())],
+            &[(0, BankHash::default())],
             0,
         )
         .unwrap();
@@ -515,7 +516,7 @@ mod tests {
     fn test_vote_signature() {
         let (vote_pubkey, mut vote_account) = create_test_account();
 
-        let vote = Vote::new(1, Hash::default());
+        let vote = Vote::new(1, BankHash::default());
 
         // unsigned
         let res = process_votes(
@@ -565,7 +566,7 @@ mod tests {
         assert_eq!(res, Ok(()));
 
         // not signed by authorized voter
-        let vote = Vote::new(2, Hash::default());
+        let vote = Vote::new(2, BankHash::default());
         let res = process_votes(
             &mut KeyedAccount::new(&vote_pubkey, true, &mut vote_account),
             &[(vote.slot, vote.hash)],
@@ -576,7 +577,7 @@ mod tests {
         assert_eq!(res, Err(InstructionError::MissingRequiredSignature));
 
         // signed by authorized voter
-        let vote = Vote::new(2, Hash::default());
+        let vote = Vote::new(2, BankHash::default());
         let res = process_votes(
             &mut KeyedAccount::new(&vote_pubkey, false, &mut vote_account),
             &[(vote.slot, vote.hash)],
@@ -599,7 +600,7 @@ mod tests {
         let res = simulate_process_vote_unchecked(
             &vote_pubkey,
             &mut vote_account,
-            &Vote::new(1, Hash::default()),
+            &Vote::new(1, BankHash::default()),
         );
         assert_eq!(res, Err(InstructionError::UninitializedAccount));
     }
@@ -751,7 +752,7 @@ mod tests {
     fn recent_votes(vote_state: &VoteState) -> Vec<Vote> {
         let start = vote_state.votes.len().saturating_sub(MAX_RECENT_VOTES);
         (start..vote_state.votes.len())
-            .map(|i| Vote::new(vote_state.votes.get(i).unwrap().slot, Hash::default()))
+            .map(|i| Vote::new(vote_state.votes.get(i).unwrap().slot, BankHash::default()))
             .collect()
     }
 
@@ -772,7 +773,7 @@ mod tests {
         // as long as b has missed less than "NUM_RECENT" votes both accounts should be in sync
         let votes: Vec<_> = (0..MAX_RECENT_VOTES)
             .into_iter()
-            .map(|i| Vote::new(i as u64, Hash::default()))
+            .map(|i| Vote::new(i as u64, BankHash::default()))
             .collect();
         let slot_hashes: Vec<_> = votes.iter().map(|vote| (vote.slot, vote.hash)).collect();
 

@@ -6,17 +6,15 @@ use crate::accounts_index::{AccountsIndex, Fork};
 use crate::append_vec::StoredAccount;
 use crate::blockhash_queue::BlockhashQueue;
 use crate::message_processor::has_duplicates;
-use bincode::serialize;
 use log::*;
 use rayon::slice::ParallelSliceMut;
 use solana_metrics::inc_new_counter_error;
 use solana_sdk::account::Account;
-use solana_sdk::hash::{Hash, Hasher};
+use solana_sdk::hash::BankHash;
 use solana_sdk::message::Message;
 use solana_sdk::native_loader;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::system_program;
-use solana_sdk::sysvar;
 use solana_sdk::transaction::Result;
 use solana_sdk::transaction::{Transaction, TransactionError};
 use std::collections::{HashMap, HashSet};
@@ -82,7 +80,7 @@ impl Accounts {
         tx: &Transaction,
         fee: u64,
         error_counters: &mut ErrorCounters,
-    ) -> Result<(Vec<Account>, InstructionCredits)> {
+    ) -> Result<(InstructionAccounts, InstructionCredits)> {
         // Copy all the accounts
         let message = tx.message();
         if tx.signatures.is_empty() && fee != 0 {
@@ -96,29 +94,28 @@ impl Accounts {
 
             // There is no way to predict what program will execute without an error
             // If a fee can pay for execution then the program will be scheduled
-            let mut called_accounts: Vec<Account> = vec![];
+            let mut called_accounts: Vec<(Account, Fork)> = vec![];
             let mut credits: InstructionCredits = vec![];
             for key in message.account_keys.iter() {
                 if !message.program_ids().contains(&key) {
                     called_accounts.push(
                         AccountsDB::load(storage, ancestors, accounts_index, key)
-                            .map(|(account, _)| account)
                             .unwrap_or_default(),
                     );
                     credits.push(0);
                 }
             }
-            if called_accounts.is_empty() || called_accounts[0].lamports == 0 {
+            if called_accounts.is_empty() || called_accounts[0].0.lamports == 0 {
                 error_counters.account_not_found += 1;
                 Err(TransactionError::AccountNotFound)
-            } else if called_accounts[0].owner != system_program::id() {
+            } else if called_accounts[0].0.owner != system_program::id() {
                 error_counters.invalid_account_for_fee += 1;
                 Err(TransactionError::InvalidAccountForFee)
-            } else if called_accounts[0].lamports < fee {
+            } else if called_accounts[0].0.lamports < fee {
                 error_counters.insufficient_funds += 1;
                 Err(TransactionError::InsufficientFundsForFee)
             } else {
-                called_accounts[0].lamports -= fee;
+                called_accounts[0].0.lamports -= fee;
                 Ok((called_accounts, credits))
             }
         }
@@ -428,23 +425,16 @@ impl Accounts {
         }
     }
 
-    fn hash_account(stored_account: &StoredAccount) -> Hash {
-        let mut hasher = Hasher::default();
-        hasher.hash(&serialize(&stored_account.balance).unwrap());
-        hasher.hash(stored_account.data);
-        hasher.result()
-    }
-
-    pub fn hash_internal_state(&self, fork_id: Fork) -> Option<Hash> {
-        let account_hashes = self.scan_fork(fork_id, |stored_account| {
+    pub fn hash_internal_state(&self, fork_id: Fork) -> Option<BankHash> {
+        /*let account_hashes = self.scan_fork(fork_id, |stored_account| {
             if !sysvar::check_id(&stored_account.balance.owner) {
                 Some(Self::hash_account(stored_account))
             } else {
                 None
             }
-        });
+        });*/
 
-        if account_hashes.is_empty() {
+        /*if account_hashes.is_empty() {
             None
         } else {
             let mut hasher = Hasher::default();
@@ -452,7 +442,13 @@ impl Accounts {
                 hasher.hash(hash.as_ref());
             }
             Some(hasher.result())
-        }
+        }*/
+        self.accounts_db
+            .fork_hashes
+            .read()
+            .unwrap()
+            .get(&fork_id)
+            .cloned()
     }
 
     /// This function will prevent multiple threads from modifying the same account state at the
@@ -574,6 +570,10 @@ impl Accounts {
         }
     }
 
+    pub fn xor_hash_state(&self, fork: Fork, hash: BankHash) {
+        self.accounts_db.xor_in_hash_state(fork, hash);
+    }
+
     fn collect_accounts_to_store<'a>(
         &self,
         txs: &'a [Transaction],
@@ -588,7 +588,7 @@ impl Accounts {
 
             let message = &txs[i].message();
             let acc = raccs.as_mut().unwrap();
-            for (((i, key), account), credit) in message
+            for (((i, key), (account, _fork)), credit) in message
                 .account_keys
                 .iter()
                 .enumerate()
@@ -847,7 +847,7 @@ mod tests {
         match &loaded_accounts[0] {
             Ok((instruction_accounts, instruction_loaders, instruction_credits)) => {
                 assert_eq!(instruction_accounts.len(), 2);
-                assert_eq!(instruction_accounts[0], accounts[0].1);
+                assert_eq!(instruction_accounts[0].0, accounts[0].1);
                 assert_eq!(instruction_loaders.len(), 1);
                 assert_eq!(instruction_loaders[0].len(), 0);
                 assert_eq!(instruction_credits.len(), 2);
@@ -1033,7 +1033,9 @@ mod tests {
         match &loaded_accounts[0] {
             Ok((instruction_accounts, instruction_loaders, instruction_credits)) => {
                 assert_eq!(instruction_accounts.len(), 1);
-                assert_eq!(instruction_accounts[0], accounts[0].1);
+                //let foo: () = accounts[0]; (pubkey, Account)
+                //let bar: () = instruction_accounts[0];
+                assert_eq!(instruction_accounts[0].0, accounts[0].1);
                 assert_eq!(instruction_loaders.len(), 2);
                 assert_eq!(instruction_loaders[0].len(), 1);
                 assert_eq!(instruction_loaders[1].len(), 2);
@@ -1129,7 +1131,7 @@ mod tests {
         let accounts = Accounts::new(None);
         assert_eq!(accounts.hash_internal_state(0), None);
         accounts.store_slow(0, &Pubkey::default(), &Account::new(1, 0, &sysvar::id()));
-        assert_eq!(accounts.hash_internal_state(0), None);
+        assert!(accounts.hash_internal_state(0).is_some());
     }
 
     fn check_accounts(accounts: &Accounts, pubkeys: &Vec<Pubkey>, num: usize) {
@@ -1475,7 +1477,7 @@ mod tests {
         let account1 = Account::new(2, 0, &Pubkey::default());
         let account2 = Account::new(3, 0, &Pubkey::default());
 
-        let instruction_accounts0 = vec![account0, account2.clone()];
+        let instruction_accounts0 = vec![(account0, 0), (account2.clone(), 0)];
         let instruction_loaders0 = vec![];
         let instruction_credits0 = vec![0, 2];
         let loaded0 = Ok((
@@ -1484,7 +1486,7 @@ mod tests {
             instruction_credits0,
         ));
 
-        let instruction_accounts1 = vec![account1, account2.clone()];
+        let instruction_accounts1 = vec![(account1, 0), (account2.clone(), 0)];
         let instruction_loaders1 = vec![];
         let instruction_credits1 = vec![0, 3];
         let loaded1 = Ok((

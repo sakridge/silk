@@ -4,8 +4,8 @@
 //! already been signed and verified.
 use crate::accounts::Accounts;
 use crate::accounts_db::{
-    AccountStorageEntry, AccountsDBSerialize, AppendVecId, ErrorCounters, InstructionAccounts,
-    InstructionCredits, InstructionLoaders,
+    AccountStorageEntry, AccountsDB, AccountsDBSerialize, AppendVecId, ErrorCounters,
+    InstructionAccounts, InstructionCredits, InstructionLoaders,
 };
 use crate::accounts_index::Fork;
 use crate::blockhash_queue::BlockhashQueue;
@@ -31,7 +31,7 @@ use solana_sdk::{
     account::Account,
     fee_calculator::FeeCalculator,
     genesis_block::GenesisBlock,
-    hash::{hashv, Hash},
+    hash::{hashv, BankHash, Hash},
     inflation::Inflation,
     native_loader,
     pubkey::Pubkey,
@@ -160,10 +160,10 @@ pub struct Bank {
     pub ancestors: HashMap<u64, usize>,
 
     /// Hash of this Bank's state. Only meaningful after freezing.
-    hash: RwLock<Hash>,
+    hash: RwLock<BankHash>,
 
     /// Hash of this Bank's parent's state
-    parent_hash: Hash,
+    parent_hash: BankHash,
 
     /// The number of transactions processed without error
     #[serde(serialize_with = "serialize_atomicusize")]
@@ -309,7 +309,7 @@ impl Bank {
             collector_fees: AtomicUsize::new(0),
             ancestors: HashMap::new(),
             epoch_stakes: HashMap::new(),
-            hash: RwLock::new(Hash::default()),
+            hash: RwLock::new(BankHash::default()),
             is_delta: AtomicBool::new(false),
             tick_height: AtomicUsize::new(parent.tick_height.load(Ordering::Relaxed)),
             signature_count: AtomicUsize::new(0),
@@ -378,16 +378,16 @@ impl Bank {
         self.epoch_schedule.get_epoch(self.slot)
     }
 
-    pub fn freeze_lock(&self) -> RwLockReadGuard<Hash> {
+    pub fn freeze_lock(&self) -> RwLockReadGuard<BankHash> {
         self.hash.read().unwrap()
     }
 
-    pub fn hash(&self) -> Hash {
+    pub fn hash(&self) -> BankHash {
         *self.hash.read().unwrap()
     }
 
     pub fn is_frozen(&self) -> bool {
-        *self.hash.read().unwrap() != Hash::default()
+        !self.hash.read().unwrap().is_default()
     }
 
     fn update_clock(&self) {
@@ -507,7 +507,7 @@ impl Bank {
     fn set_hash(&self) -> bool {
         let mut hash = self.hash.write().unwrap();
 
-        if *hash == Hash::default() {
+        if hash.is_default() {
             // finish up any deferred changes to account state
             self.commit_credits();
             self.collect_fees();
@@ -965,6 +965,7 @@ impl Bank {
 
         let mut execution_time = Measure::start("execution_time");
         let mut signature_count = 0;
+        let mut hash_state = BankHash::default();
         let executed: Vec<Result<()>> = loaded_accounts
             .iter_mut()
             .zip(txs.iter())
@@ -972,11 +973,40 @@ impl Bank {
                 Err(e) => Err(e.clone()),
                 Ok((ref mut accounts, ref mut loaders, ref mut credits)) => {
                     signature_count += tx.message().header.num_required_signatures as usize;
-                    self.message_processor
-                        .process_message(tx.message(), loaders, accounts, credits)
+                    let hashes: Vec<_> = accounts
+                        .iter()
+                        .map(|(account, fork)| {
+                            if *fork == self.slot() {
+                                let hash = AccountsDB::hash_account(*fork, account);
+                                Some(hash)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    let mut accounts: Vec<_> = accounts
+                        .into_iter()
+                        .map(|(account, _fork)| account.clone())
+                        .collect();
+                    let message_status = self.message_processor.process_message(
+                        tx.message(),
+                        loaders,
+                        &mut accounts,
+                        credits,
+                    );
+                    if message_status.is_ok() {
+                        for hash in hashes {
+                            if let Some(hash) = hash {
+                                AccountsDB::xor_hash_state(&mut hash_state, hash);
+                            }
+                        }
+                    }
+                    message_status
                 }
             })
             .collect();
+
+        self.rc.accounts.xor_hash_state(self.slot(), hash_state);
 
         execution_time.stop();
 
@@ -1268,18 +1298,18 @@ impl Bank {
 
     /// Hash the `accounts` HashMap. This represents a validator's interpretation
     ///  of the delta of the ledger since the last vote and up to now
-    fn hash_internal_state(&self) -> Hash {
+    fn hash_internal_state(&self) -> BankHash {
         // If there are no accounts, return the same hash as we did before
         // checkpointing.
         if let Some(accounts_delta_hash) = self.rc.accounts.hash_internal_state(self.slot()) {
             let mut signature_count_buf = [0u8; 8];
             LittleEndian::write_u64(&mut signature_count_buf[..], self.signature_count() as u64);
 
-            hashv(&[
+            BankHash::from_hash(hashv(&[
                 &self.parent_hash.as_ref(),
                 &accounts_delta_hash.as_ref(),
                 &signature_count_buf,
-            ])
+            ]))
         } else {
             self.parent_hash
         }
@@ -1342,12 +1372,12 @@ impl Bank {
             let message = &txs[i].message();
             let acc = raccs.as_ref().unwrap();
 
-            for (pubkey, account) in
+            for (pubkey, (account, _fork)) in
                 message
                     .account_keys
                     .iter()
                     .zip(acc.0.iter())
-                    .filter(|(_, account)| {
+                    .filter(|(_key, (account, _fork))| {
                         (Stakes::is_stake(account)) || storage_utils::is_storage(account)
                     })
             {

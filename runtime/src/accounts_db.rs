@@ -21,6 +21,7 @@
 use crate::accounts_index::{AccountsIndex, Fork};
 use crate::append_vec::{AppendVec, StorageMeta, StoredAccount};
 use bincode::{deserialize_from, serialize_into};
+use byteorder::{ByteOrder, LittleEndian};
 use fs_extra::dir::CopyOptions;
 use log::*;
 use rand::{thread_rng, Rng};
@@ -31,6 +32,8 @@ use serde::ser::{SerializeMap, Serializer};
 use serde::{Deserialize, Serialize};
 use solana_measure::measure::Measure;
 use solana_sdk::account::{Account, LamportCredit};
+use solana_sdk::hash::BankHash;
+use solana_sdk::hash::Hasher;
 use solana_sdk::pubkey::Pubkey;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -76,7 +79,7 @@ pub struct AccountInfo {
 }
 /// An offset into the AccountsDB::storage vector
 pub type AppendVecId = usize;
-pub type InstructionAccounts = Vec<Account>;
+pub type InstructionAccounts = Vec<(Account, Fork)>;
 pub type InstructionCredits = Vec<LamportCredit>;
 pub type InstructionLoaders = Vec<Vec<(Pubkey, Account)>>;
 
@@ -369,6 +372,8 @@ pub struct AccountsDB {
     pub thread_pool: ThreadPool,
 
     min_num_stores: usize,
+
+    pub fork_hashes: RwLock<HashMap<Fork, BankHash>>,
 }
 
 impl Default for AccountsDB {
@@ -388,6 +393,7 @@ impl Default for AccountsDB {
                 .build()
                 .unwrap(),
             min_num_stores: num_threads,
+            fork_hashes: RwLock::new(HashMap::default()),
         }
     }
 }
@@ -701,6 +707,28 @@ impl AccountsDB {
         }
     }
 
+    pub fn hash_account(fork: Fork, account: &Account) -> BankHash {
+        let mut hasher = Hasher::default();
+        let mut buf = [0u8; 8];
+
+        LittleEndian::write_u64(&mut buf[..], account.lamports);
+        hasher.hash(&buf);
+
+        LittleEndian::write_u64(&mut buf[..], fork);
+        hasher.hash(&buf);
+
+        hasher.hash(&account.data);
+
+        let hash = hasher.result();
+        BankHash::from_hash(hash)
+    }
+
+    pub fn xor_hash_state(state: &mut BankHash, hash: BankHash) {
+        for (i, b) in hash.as_ref().iter().enumerate() {
+            state.as_mut()[i] ^= b;
+        }
+    }
+
     fn store_accounts(&self, fork_id: Fork, accounts: &[(&Pubkey, &Account)]) -> Vec<AccountInfo> {
         let with_meta: Vec<(StorageMeta, &Account)> = accounts
             .iter()
@@ -745,7 +773,14 @@ impl AccountsDB {
             // restore the state to available
             storage.set_status(AccountStorageStatus::Available);
         }
+
         infos
+    }
+
+    pub fn xor_in_hash_state(&self, fork_id: Fork, hash: BankHash) {
+        let mut fork_hashes = self.fork_hashes.write().unwrap();
+        let fork_hash_state = fork_hashes.entry(fork_id).or_insert(BankHash::default());
+        Self::xor_hash_state(fork_hash_state, hash);
     }
 
     fn update_index(
@@ -819,11 +854,22 @@ impl AccountsDB {
         }
     }
 
+    fn hash_accounts(&self, fork_id: Fork, accounts: &[(&Pubkey, &Account)]) {
+        let mut hash_state = BankHash::default();
+        for (_pubkey, account) in accounts {
+            let hash = Self::hash_account(fork_id, account);
+            Self::xor_hash_state(&mut hash_state, hash);
+        }
+        self.xor_in_hash_state(fork_id, hash_state);
+    }
+
     /// Store the account update.
     pub fn store(&self, fork_id: Fork, accounts: &[(&Pubkey, &Account)]) {
         let mut store_accounts = Measure::start("store::store_accounts");
         let infos = self.store_accounts(fork_id, accounts);
         store_accounts.stop();
+
+        self.hash_accounts(fork_id, accounts);
 
         let mut update_index = Measure::start("store::update_index");
         let (reclaims, last_root) = self.update_index(fork_id, infos, accounts);

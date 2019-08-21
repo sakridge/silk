@@ -3,7 +3,7 @@
 //! this account carries the Bank's most recent blockhashes for some N parents
 //!
 use crate::account::Account;
-use crate::hash::Hash;
+use crate::hash::BankHash;
 use crate::sysvar;
 use bincode::serialized_size;
 use std::ops::Deref;
@@ -19,10 +19,12 @@ crate::solana_name_id!(ID, "SysvarS1otHashes111111111111111111111111111");
 
 pub const MAX_SLOT_HASHES: usize = 512; // 512 slots to get your vote in
 
+pub type SlotHash = (Slot, BankHash);
+
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub struct SlotHashes {
     // non-pub to keep control of size
-    inner: Vec<(Slot, Hash)>,
+    inner: Vec<SlotHash>,
 }
 
 impl SlotHashes {
@@ -35,15 +37,15 @@ impl SlotHashes {
 
     pub fn size_of() -> usize {
         serialized_size(&SlotHashes {
-            inner: vec![(0, Hash::default()); MAX_SLOT_HASHES],
+            inner: vec![(0, BankHash::default()); MAX_SLOT_HASHES],
         })
         .unwrap() as usize
     }
-    pub fn add(&mut self, slot: Slot, hash: Hash) {
+    pub fn add(&mut self, slot: Slot, hash: BankHash) {
         self.inner.insert(0, (slot, hash));
         self.inner.truncate(MAX_SLOT_HASHES);
     }
-    pub fn new(slot_hashes: &[(Slot, Hash)]) -> Self {
+    pub fn new(slot_hashes: &[SlotHash]) -> Self {
         Self {
             inner: slot_hashes.to_vec(),
         }
@@ -51,13 +53,13 @@ impl SlotHashes {
 }
 
 impl Deref for SlotHashes {
-    type Target = Vec<(u64, Hash)>;
+    type Target = Vec<SlotHash>;
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }
 
-pub fn create_account(lamports: u64, slot_hashes: &[(Slot, Hash)]) -> Account {
+pub fn create_account(lamports: u64, slot_hashes: &[SlotHash]) -> Account {
     let mut account = Account::new(lamports, SlotHashes::size_of(), &sysvar::id());
     SlotHashes::new(slot_hashes).to(&mut account).unwrap();
     account

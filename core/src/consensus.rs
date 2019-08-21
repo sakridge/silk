@@ -2,7 +2,7 @@ use crate::bank_forks::BankForks;
 use solana_metrics::datapoint_info;
 use solana_runtime::bank::Bank;
 use solana_sdk::account::Account;
-use solana_sdk::hash::Hash;
+use solana_sdk::hash::BankHash;
 use solana_sdk::pubkey::Pubkey;
 use solana_vote_api::vote_state::{Lockout, Vote, VoteState, MAX_LOCKOUT_HISTORY};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -166,7 +166,7 @@ impl Tower {
             .unwrap_or(false)
     }
 
-    pub fn record_vote(&mut self, slot: u64, hash: Hash) -> Option<u64> {
+    pub fn record_vote(&mut self, slot: u64, hash: BankHash) -> Option<u64> {
         trace!("{} record_vote for {}", self.node_pubkey, slot);
         let root_slot = self.lockouts.root_slot;
         let vote = Vote { slot, hash };
