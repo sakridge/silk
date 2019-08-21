@@ -11,6 +11,8 @@ use std::str::FromStr;
 #[repr(transparent)]
 pub struct Hash([u8; 32]);
 
+pub type BankHash = Hash;
+
 #[derive(Clone, Default)]
 pub struct Hasher {
     hasher: Sha256,

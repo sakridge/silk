@@ -3,6 +3,7 @@
 //! this account carries the Bank's most recent blockhashes for some N parents
 //!
 use crate::account::Account;
+use crate::hash::BankHash;
 use crate::hash::Hash;
 use crate::sysvar;
 use bincode::serialized_size;
@@ -19,10 +20,12 @@ crate::solana_name_id!(ID, "SysvarS1otHashes111111111111111111111111111");
 
 pub const MAX_SLOT_HASHES: usize = 512; // 512 slots to get your vote in
 
+pub type SlotHash = (Slot, BankHash);
+
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub struct SlotHashes {
     // non-pub to keep control of size
-    inner: Vec<(Slot, Hash)>,
+    inner: Vec<SlotHash>,
 }
 
 impl SlotHashes {
@@ -43,7 +46,7 @@ impl SlotHashes {
         self.inner.insert(0, (slot, hash));
         self.inner.truncate(MAX_SLOT_HASHES);
     }
-    pub fn new(slot_hashes: &[(Slot, Hash)]) -> Self {
+    pub fn new(slot_hashes: &[SlotHash]) -> Self {
         Self {
             inner: slot_hashes.to_vec(),
         }
@@ -57,7 +60,7 @@ impl Deref for SlotHashes {
     }
 }
 
-pub fn create_account(lamports: u64, slot_hashes: &[(Slot, Hash)]) -> Account {
+pub fn create_account(lamports: u64, slot_hashes: &[SlotHash]) -> Account {
     let mut account = Account::new(lamports, SlotHashes::size_of(), &sysvar::id());
     SlotHashes::new(slot_hashes).to(&mut account).unwrap();
     account

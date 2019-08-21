@@ -31,7 +31,7 @@ use solana_sdk::{
     account::Account,
     fee_calculator::FeeCalculator,
     genesis_block::GenesisBlock,
-    hash::{hashv, Hash},
+    hash::{hashv, BankHash, Hash},
     inflation::Inflation,
     native_loader,
     pubkey::Pubkey,
@@ -160,10 +160,10 @@ pub struct Bank {
     pub ancestors: HashMap<u64, usize>,
 
     /// Hash of this Bank's state. Only meaningful after freezing.
-    hash: RwLock<Hash>,
+    hash: RwLock<BankHash>,
 
     /// Hash of this Bank's parent's state
-    parent_hash: Hash,
+    parent_hash: BankHash,
 
     /// The number of transactions processed without error
     #[serde(serialize_with = "serialize_atomicusize")]
@@ -1268,7 +1268,7 @@ impl Bank {
 
     /// Hash the `accounts` HashMap. This represents a validator's interpretation
     ///  of the delta of the ledger since the last vote and up to now
-    fn hash_internal_state(&self) -> Hash {
+    fn hash_internal_state(&self) -> BankHash {
         // If there are no accounts, return the same hash as we did before
         // checkpointing.
         if let Some(accounts_delta_hash) = self.rc.accounts.hash_internal_state(self.slot()) {

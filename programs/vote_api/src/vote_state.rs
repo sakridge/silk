@@ -10,6 +10,7 @@ use solana_sdk::hash::Hash;
 use solana_sdk::instruction::InstructionError;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::sysvar::clock::Clock;
+use solana_sdk::sysvar::slot_hashes::SlotHash;
 pub use solana_sdk::timing::{Epoch, Slot};
 use std::collections::VecDeque;
 
@@ -148,13 +149,13 @@ impl VoteState {
         }
     }
 
-    pub fn process_votes(&mut self, votes: &[Vote], slot_hashes: &[(Slot, Hash)], epoch: Epoch) {
+    pub fn process_votes(&mut self, votes: &[Vote], slot_hashes: &[SlotHash], epoch: Epoch) {
         votes
             .iter()
             .for_each(|v| self.process_vote(v, slot_hashes, epoch));
     }
 
-    pub fn process_vote(&mut self, vote: &Vote, slot_hashes: &[(Slot, Hash)], epoch: Epoch) {
+    pub fn process_vote(&mut self, vote: &Vote, slot_hashes: &[SlotHash], epoch: Epoch) {
         // Ignore votes for slots earlier than we already have votes for
         if self
             .votes
@@ -339,7 +340,7 @@ pub fn initialize_account(
 
 pub fn process_votes(
     vote_account: &mut KeyedAccount,
-    slot_hashes: &[(Slot, Hash)],
+    slot_hashes: &[SlotHash],
     clock: &Clock,
     other_signers: &[KeyedAccount],
     votes: &[Vote],
