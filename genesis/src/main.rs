@@ -6,7 +6,8 @@ use solana_clap_utils::{
     input_validators::{is_pubkey_or_keypair, is_rfc3339_datetime, is_valid_percentage},
 };
 use solana_genesis::{genesis_accounts::add_genesis_accounts, Base64Account};
-use solana_ledger::{blockstore::create_new_ledger, poh::compute_hashes_per_tick};
+use solana_ledger::blockstore::create_new_ledger;
+use solana_poh::poh::compute_hashes_per_tick;
 use solana_sdk::{
     account::Account,
     clock,

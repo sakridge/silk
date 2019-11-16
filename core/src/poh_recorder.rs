@@ -13,7 +13,7 @@
 use solana_ledger::blockstore::Blockstore;
 use solana_ledger::entry::Entry;
 use solana_ledger::leader_schedule_cache::LeaderScheduleCache;
-use solana_ledger::poh::Poh;
+use solana_poh::poh::Poh;
 use solana_runtime::bank::Bank;
 pub use solana_sdk::clock::Slot;
 use solana_sdk::clock::NUM_CONSECUTIVE_LEADER_SLOTS;

@@ -59,6 +59,7 @@ members = [
     "cli",
     "rayon-threadlimit",
     "watchtower",
+    "poh",
 ]
 
 exclude = [

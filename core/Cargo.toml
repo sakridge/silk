@@ -62,6 +62,7 @@ solana-streamer = { path = "../streamer", version = "1.1.0" }
 solana-vote-program = { path = "../programs/vote", version = "1.1.0" }
 solana-vote-signer = { path = "../vote-signer", version = "1.1.0" }
 solana-sys-tuner = { path = "../sys-tuner", version = "1.1.0" }
+solana-poh = { path = "../poh", version = "1.1.0" }
 tempfile = "3.1.0"
 thiserror = "1.0"
 tokio = "0.1"
@@ -89,9 +90,6 @@ name = "gen_keys"
 
 [[bench]]
 name = "sigverify_stage"
-
-[[bench]]
-name = "poh"
 
 [[bench]]
 name = "retransmit_stage"
