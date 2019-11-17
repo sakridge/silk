@@ -38,7 +38,7 @@ use solana_net_utils::{
 };
 use solana_perf::packet::{to_packets_with_destination, Packets};
 use solana_sdk::{
-    clock::Slot,
+    clock::{Slot, DEFAULT_MS_PER_SLOT},
     pubkey::Pubkey,
     signature::{Keypair, KeypairUtil, Signable, Signature},
     timing::{duration_as_ms, timestamp},
@@ -362,6 +362,7 @@ impl ClusterInfo {
             .collect();
         let max_ts = votes.iter().map(|x| x.0).max().unwrap_or(since);
         let txs: Vec<Transaction> = votes.into_iter().map(|x| x.1).collect();
+        inc_new_counter_info!("cluster_info-get_votes-count", txs.len());
         (txs, max_ts)
     }
 
@@ -401,10 +402,6 @@ impl ClusterInfo {
             .table
             .get(&CrdsValueLabel::ContactInfo(*pubkey))
             .map(|x| x.value.contact_info().unwrap())
-    }
-
-    pub fn purge(&mut self, now: u64) {
-        self.gossip.purge(now);
     }
 
     pub fn rpc_peers(&self) -> Vec<ContactInfo> {
@@ -1040,7 +1037,26 @@ impl ClusterInfo {
                     if exit.load(Ordering::Relaxed) {
                         return;
                     }
-                    obj.write().unwrap().purge(timestamp());
+                    let timeout = {
+                        if let Some(ref bank_forks) = bank_forks {
+                            let bank = bank_forks.read().unwrap().working_bank();
+                            let epoch = bank.epoch();
+                            let epoch_schedule = bank.epoch_schedule();
+                            epoch_schedule.get_slots_in_epoch(epoch) * DEFAULT_MS_PER_SLOT
+                        } else {
+                            inc_new_counter_warn!("cluster_info-purge-no_working_bank", 1);
+                            warn!("Gossip has no working bank!");
+                            CRDS_GOSSIP_PULL_CRDS_TIMEOUT_MS
+                        }
+                    };
+                    inc_new_counter_info!("cluster_info-purge-stake_timeeout", timeout as usize);
+                    let timeouts = obj.read().unwrap().gossip.make_timeouts(&stakes, timeout);
+                    let num_purged = obj.write().unwrap().gossip.purge(timestamp(), &timeouts);
+                    inc_new_counter_info!("cluster_info-purge-count", num_purged);
+                    inc_new_counter_info!(
+                        "cluster_info-table-size",
+                        obj.read().unwrap().gossip.crds.table.len()
+                    );
                     //TODO: possibly tune this parameter
                     //we saw a deadlock passing an obj.read().unwrap().timeout into sleep
                     if start - last_push > CRDS_GOSSIP_PULL_CRDS_TIMEOUT_MS / 2 {

@@ -281,6 +281,7 @@ impl ReplayStage {
                                 if !partition && vote_bank_slot != bank.slot() {
                                     warn!("PARTITION DETECTED waiting to join fork: {} last vote: {:?}", bank.slot(), tower.last_vote());
                                     inc_new_counter_info!("replay_stage-partition_detected", 1);
+                                    inc_new_counter_info!("replay_stage-partition_slot", bank.slot() as usize);
                                     partition = true;
                                 } else if partition && vote_bank_slot == bank.slot() {
                                     warn!("PARTITION resolved fork: {} last vote: {:?}", bank.slot(), tower.last_vote());
@@ -700,6 +701,13 @@ impl ReplayStage {
         frozen_banks.sort_by_key(|bank| bank.slot());
 
         trace!("frozen_banks {}", frozen_banks.len());
+        inc_new_counter_info!("replay_stage-select_fork-frozen_banks", frozen_banks.len());
+        let num_old_banks = frozen_banks
+            .iter()
+            .filter(|b| b.slot() < tower.root().unwrap_or(0))
+            .count();
+        inc_new_counter_info!("replay_stage-select_fork-old_frozen_banks", num_old_banks);
+
         let stats: Vec<ForkStats> = frozen_banks
             .iter()
             .map(|bank| {
@@ -727,7 +735,7 @@ impl ReplayStage {
                 );
                 if !stats.computed {
                     if !stats.vote_threshold {
-                        info!("vote threshold check failed: {}", bank.slot());
+                        debug!("vote threshold check failed: {}", bank.slot());
                     }
                     stats.computed = true;
                 }
@@ -740,6 +748,25 @@ impl ReplayStage {
                 stats
             })
             .collect();
+        let threshold_failure = stats
+            .iter()
+            .filter(|s| s.is_recent && !s.has_voted && !s.vote_threshold)
+            .count();
+        if threshold_failure != 0 {
+            let banks: Vec<_> = stats
+                .iter()
+                .filter(|s| s.is_recent && !s.has_voted && !s.vote_threshold)
+                .map(|s| s.slot)
+                .collect();
+            let total = stats.iter().filter(|s| s.is_recent && !s.has_voted).count();
+            banks
+                .iter()
+                .for_each(|b| inc_new_counter_info!("replay_stage-threshold_slot", *b as usize));
+            warn!(
+                "PARTITION THRESHOLD FAILURE {}/{} {:?}",
+                threshold_failure, total, banks
+            );
+        }
         let mut votable: Vec<_> = frozen_banks
             .iter()
             .zip(stats.iter())

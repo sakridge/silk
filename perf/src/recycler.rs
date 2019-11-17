@@ -111,6 +111,7 @@ impl<T: Default + Reset> Recycler<T> {
                 .max_gc
                 .compare_and_swap(max_gc, len, Ordering::Relaxed);
         }
+        inc_new_counter_info!("recycle-gc_len", len);
     }
 }
 
