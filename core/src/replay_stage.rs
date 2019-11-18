@@ -748,10 +748,24 @@ impl ReplayStage {
                 stats
             })
             .collect();
+        let count = stats.iter().filter(|s| !s.is_recent).count();
+        inc_new_counter_info!("replay_stage-select_fork-not_recent-count", count);
+
+        let count = stats.iter().filter(|s| s.has_voted).count();
+        inc_new_counter_info!("replay_stage-select_fork-has_voted-count", count);
+
+        let count = stats.iter().filter(|s| !s.vote_threshold).count();
+        inc_new_counter_info!("replay_stage-select_fork-threshold_failure-count", count);
+
         let threshold_failure = stats
             .iter()
             .filter(|s| s.is_recent && !s.has_voted && !s.vote_threshold)
             .count();
+        inc_new_counter_info!(
+            "replay_stage-select_fork-threshold_failure-votable_count",
+            threshold_failure
+        );
+
         if threshold_failure != 0 {
             let banks: Vec<_> = stats
                 .iter()
