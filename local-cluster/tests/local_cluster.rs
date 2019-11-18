@@ -263,7 +263,7 @@ fn run_network_partition(partitions: &[usize]) {
             info!("PARTITION_TEST min observed roots {}/16", min_node);
             done = min_node >= 16;
         }
-        sleep(Duration::from_millis(400));
+        sleep(Duration::from_millis(clock::DEFAULT_MS_PER_SLOT / 2));
     }
     info!("PARTITION_TEST done spending on all node");
 }
