@@ -1049,13 +1049,14 @@ impl ClusterInfo {
                             CRDS_GOSSIP_PULL_CRDS_TIMEOUT_MS
                         }
                     };
-                    inc_new_counter_info!("cluster_info-purge-stake_timeeout", timeout as usize);
                     let timeouts = obj.read().unwrap().gossip.make_timeouts(&stakes, timeout);
                     let num_purged = obj.write().unwrap().gossip.purge(timestamp(), &timeouts);
                     inc_new_counter_info!("cluster_info-purge-count", num_purged);
-                    inc_new_counter_info!(
-                        "cluster_info-table-size",
-                        obj.read().unwrap().gossip.crds.table.len()
+                    let table_size = obj.read().unwrap().gossip.crds.table.len();
+                    datapoint_debug!(
+                        "cluster_info-purge",
+                        ("tabel_size", table_size as i64, i64),
+                        ("purge_stake_timeout", timeout as i64, i64)
                     );
                     //TODO: possibly tune this parameter
                     //we saw a deadlock passing an obj.read().unwrap().timeout into sleep
