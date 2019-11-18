@@ -281,7 +281,7 @@ impl ReplayStage {
                                 if !partition && vote_bank_slot != bank.slot() {
                                     warn!("PARTITION DETECTED waiting to join fork: {} last vote: {:?}", bank.slot(), tower.last_vote());
                                     inc_new_counter_info!("replay_stage-partition_detected", 1);
-                                    inc_new_counter_info!("replay_stage-partition_slot", bank.slot() as usize);
+                                    datapoint_info!("replay_stage-partition", ("slot", bank.slot() as i64, i64));
                                     partition = true;
                                 } else if partition && vote_bank_slot == bank.slot() {
                                     warn!("PARTITION resolved fork: {} last vote: {:?}", bank.slot(), tower.last_vote());
@@ -312,11 +312,7 @@ impl ReplayStage {
                             );
                         }
                     }
-
-                    inc_new_counter_info!(
-                        "replay_stage-duration",
-                        duration_as_ms(&now.elapsed()) as usize
-                    );
+                    datapoint_info!("replay_stage", ("duration", duration_as_ms(&now.elapsed()) as i64, i64));
                     if did_complete_bank {
                         //just processed a bank, skip the signal; maybe there's more slots available
                         continue;
@@ -699,14 +695,13 @@ impl ReplayStage {
             .cloned()
             .collect();
         frozen_banks.sort_by_key(|bank| bank.slot());
+        let num_frozen_banks = frozen_banks.len();
 
         trace!("frozen_banks {}", frozen_banks.len());
-        inc_new_counter_info!("replay_stage-select_fork-frozen_banks", frozen_banks.len());
         let num_old_banks = frozen_banks
             .iter()
             .filter(|b| b.slot() < tower.root().unwrap_or(0))
             .count();
-        inc_new_counter_info!("replay_stage-select_fork-old_frozen_banks", num_old_banks);
 
         let stats: Vec<ForkStats> = frozen_banks
             .iter()
@@ -748,37 +743,30 @@ impl ReplayStage {
                 stats
             })
             .collect();
-        let count = stats.iter().filter(|s| !s.is_recent).count();
-        inc_new_counter_info!("replay_stage-select_fork-not_recent-count", count);
-
-        let count = stats.iter().filter(|s| s.has_voted).count();
-        inc_new_counter_info!("replay_stage-select_fork-has_voted-count", count);
-
-        let count = stats.iter().filter(|s| !s.vote_threshold).count();
-        inc_new_counter_info!("replay_stage-select_fork-threshold_failure-count", count);
-
-        let threshold_failure = stats
+        let num_not_recent = stats.iter().filter(|s| !s.is_recent).count();
+        let num_has_voted = stats.iter().filter(|s| s.has_voted).count();
+        let num_votable_banks = stats.iter().filter(|s| s.is_recent && !s.has_voted).count();
+        let num_threshold_failure = stats.iter().filter(|s| !s.vote_threshold).count();
+        let num_votable_threshold_failure = stats
             .iter()
             .filter(|s| s.is_recent && !s.has_voted && !s.vote_threshold)
             .count();
-        inc_new_counter_info!(
-            "replay_stage-select_fork-threshold_failure-votable_count",
-            threshold_failure
-        );
 
-        if threshold_failure != 0 {
+        if num_votable_threshold_failure != 0 {
             let banks: Vec<_> = stats
                 .iter()
                 .filter(|s| s.is_recent && !s.has_voted && !s.vote_threshold)
                 .map(|s| s.slot)
                 .collect();
-            let total = stats.iter().filter(|s| s.is_recent && !s.has_voted).count();
-            banks
-                .iter()
-                .for_each(|b| inc_new_counter_info!("replay_stage-threshold_slot", *b as usize));
+            banks.iter().for_each(|b| {
+                datapoint_info!(
+                    "replay_stage-select_fork",
+                    ("threshold_slot", *b as i64, i64),
+                )
+            });
             warn!(
                 "PARTITION THRESHOLD FAILURE {}/{} {:?}",
-                threshold_failure, total, banks
+                num_votable_threshold_failure, num_votable_banks, banks
             );
         }
         let mut votable: Vec<_> = frozen_banks
@@ -815,7 +803,20 @@ impl ReplayStage {
             weights,
             rv.0.is_some()
         );
-        inc_new_counter_info!("replay_stage-tower_duration", ms as usize);
+        datapoint_info!(
+            "replay_stage-select_fork",
+            ("frozen_banks", num_frozen_banks as i64, i64),
+            ("not_recent", num_not_recent as i64, i64),
+            ("has_voted", num_has_voted as i64, i64),
+            ("old_banks", num_old_banks as i64, i64),
+            ("threshold_failure", num_threshold_failure as i64, i64),
+            (
+                "votable_threshold_failure",
+                num_votable_threshold_failure as i64,
+                i64
+            ),
+            ("tower_duration", ms as i64, i64),
+        );
         rv
     }
 
