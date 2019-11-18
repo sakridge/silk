@@ -829,40 +829,21 @@ impl ReplayStage {
         let mut rv = None;
         let (best_bank, best_stats) = best_banks.last().unwrap();
         debug!("best bank: {:?}", best_stats);
-        let mut by_slot: Vec<_> = best_banks.iter().collect();
-        by_slot.sort_by_key(|x| x.1.slot);
-        //look for the oldest ancestors of the best bank
-        if let Some(best_ancestors) = ancestors.get(&best_stats.slot) {
-            for (parent, parent_stats) in by_slot.iter() {
-                if parent_stats.is_locked_out {
-                    continue;
-                }
-                if !best_ancestors.contains(&parent_stats.slot) {
-                    continue;
-                }
-                debug!("best bank found ancestor: {}", parent_stats.slot);
-                inc_new_counter_info!("replay_stage-pick_best_fork-ancestor", 1);
-                rv = Some(((*parent).clone(), parent_stats.total_staked));
+        //look for the heaviest child of the best bank
+        for (child, child_stats) in best_banks.iter().rev() {
+            if child_stats.is_locked_out {
+                continue;
             }
-        }
-        //look for the oldest child of the best bank
-        if rv.is_none() {
-            for (child, child_stats) in by_slot.iter().rev() {
-                if child_stats.is_locked_out {
-                    continue;
-                }
-                let has_best = best_stats.slot == child_stats.slot
-                    || ancestors
-                        .get(&child.slot())
-                        .map(|set| set.contains(&best_stats.slot))
-                        .unwrap_or(false);
-                if !has_best {
-                    continue;
-                }
-                inc_new_counter_info!("replay_stage-pick_best_fork-child", 1);
-                debug!("best bank found child: {}", child_stats.slot);
-                rv = Some(((*child).clone(), child_stats.total_staked));
+            let has_best = best_stats.slot == child_stats.slot
+                || ancestors
+                    .get(&child.slot())
+                    .map(|set| set.contains(&best_stats.slot))
+                    .unwrap_or(false);
+            if !has_best {
+                continue;
             }
+            debug!("best bank found child: {}", child_stats.slot);
+            rv = Some(((*child).clone(), child_stats.total_staked));
         }
         if rv.is_none() {
             inc_new_counter_info!("replay_stage-fork_selection-heavy_bank_lockout", 1);
