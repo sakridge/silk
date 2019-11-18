@@ -260,10 +260,10 @@ fn run_network_partition(partitions: &[usize]) {
             let slot = client.get_slot().unwrap_or(0);
             roots[i].insert(slot);
             let min_node = roots.iter().map(|r| r.len()).min().unwrap_or(0);
-            info!("PARTITION_TEST min observed roots {}/32", min_node);
-            done = min_node >= 32;
-            sleep(Duration::from_millis(1_000));
+            info!("PARTITION_TEST min observed roots {}/16", min_node);
+            done = min_node >= 16;
         }
+        sleep(Duration::from_millis(400));
     }
     info!("PARTITION_TEST done spending on all node");
 }
