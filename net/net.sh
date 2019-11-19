@@ -454,6 +454,11 @@ startCommon() {
     --exclude 'net/log*' \
     "$SOLANA_ROOT"/{fetch-perf-libs.sh,scripts,net,multinode-demo} \
     "$ipAddress":~/solana/
+  rsync -vPrc -e "ssh ${sshOptions[*]}" \
+    --exclude 'net/log*' \
+    ~/src/heaptrack/build \
+    "$ipAddress":~/heaptrack
+
 }
 
 startBootstrapLeader() {
@@ -472,14 +477,18 @@ startBootstrapLeader() {
       "$ipAddress:$remoteExternalPrimordialAccountsFile"
     case $deployMethod in
     tar)
+      echo "tar deploy"
       rsync -vPrc -e "ssh ${sshOptions[*]}" "$SOLANA_ROOT"/solana-release/bin/* "$ipAddress:~/.cargo/bin/"
       rsync -vPrc -e "ssh ${sshOptions[*]}" "$SOLANA_ROOT"/solana-release/version.yml "$ipAddress:~/"
       ;;
     local)
+      echo "Local deploy"
       rsync -vPrc -e "ssh ${sshOptions[*]}" "$SOLANA_ROOT"/farf/bin/* "$ipAddress:~/.cargo/bin/"
+      rsync -vPrc -e "ssh ${sshOptions[*]}" ~/src/heaptrack/build/* "$ipAddress:~/heaptrack"
       ssh "${sshOptions[@]}" -n "$ipAddress" "rm -f ~/version.yml; touch ~/version.yml"
       ;;
     skip)
+      echo "skip deploy"
       ;;
     *)
       usage "Internal error: invalid deployMethod: $deployMethod"

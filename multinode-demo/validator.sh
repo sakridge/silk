@@ -289,7 +289,7 @@ setup_validator_accounts "$node_lamports"
 while true; do
   echo "$PS4$program ${args[*]}"
 
-  $program "${args[@]}" &
+  /home/solana/heaptrack/build/bin/heaptrack $program "${args[@]}" &
   pid=$!
   echo "pid: $pid"
 

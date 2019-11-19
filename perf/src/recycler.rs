@@ -86,15 +86,16 @@ impl<T: Default + Reset> Recycler<T> {
             return x;
         }
 
-        let total = self.stats.total.fetch_add(1, Ordering::Relaxed);
-        trace!(
-            "allocating new: total {} {:?} id: {} reuse: {} max_gc: {}",
-            total,
-            name,
-            self.id,
-            self.stats.reuse.load(Ordering::Relaxed),
-            self.stats.max_gc.load(Ordering::Relaxed),
-        );
+        if self.stats.total.load(Ordering::Relaxed) > 100 {
+            info!(
+                "allocating new: total {} {:?} id: {} reuse: {} max_gc: {}",
+                self.stats.total.fetch_add(1, Ordering::Relaxed),
+                name,
+                self.id,
+                self.stats.reuse.load(Ordering::Relaxed),
+                self.stats.max_gc.load(Ordering::Relaxed),
+            );
+        }
 
         T::default()
     }

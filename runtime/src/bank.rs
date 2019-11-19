@@ -312,6 +312,9 @@ impl Bank {
 
     /// Create a new bank that points to an immutable checkpoint of another bank.
     pub fn new_from_parent(parent: &Arc<Bank>, collector_id: &Pubkey, slot: Slot) -> Self {
+        use std::mem::size_of;
+        info!("new_from_parent: {} bhq: {} mp: {}",
+              size_of::<Bank>(), size_of::<BlockhashQueue>(), size_of::<MessageProcessor>());
         parent.freeze();
         assert_ne!(slot, parent.slot());
 

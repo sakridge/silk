@@ -1404,7 +1404,7 @@ impl ClusterInfo {
         stakes: &HashMap<Pubkey, u64>,
     ) -> Option<Packets> {
         let self_id = me.read().unwrap().gossip.id;
-        inc_new_counter_debug!("cluster_info-push_message", 1);
+        //inc_new_counter_debug!("cluster_info-push_message", 1);
 
         let updated: Vec<_> =
             me.write()
@@ -1422,7 +1422,7 @@ impl ClusterInfo {
         let rsp: Vec<_> = prunes_map
             .into_iter()
             .filter_map(|(from, prune_set)| {
-                inc_new_counter_debug!("cluster_info-push_message-prunes", prune_set.len());
+                //inc_new_counter_debug!("cluster_info-push_message-prunes", prune_set.len());
                 me.read().unwrap().lookup(&from).cloned().and_then(|ci| {
                     let mut prune_msg = PruneData {
                         pubkey: self_id,
@@ -1443,7 +1443,7 @@ impl ClusterInfo {
         let mut packets = to_packets_with_destination(recycler.clone(), &rsp);
         if !packets.is_empty() {
             let pushes: Vec<_> = me.write().unwrap().new_push_requests();
-            inc_new_counter_debug!("cluster_info-push_message-pushes", pushes.len());
+            //inc_new_counter_debug!("cluster_info-push_message-pushes", pushes.len());
             pushes.into_iter().for_each(|(remote_gossip_addr, req)| {
                 let p = Packet::from_data(&remote_gossip_addr, &req);
                 packets.packets.push(p);
