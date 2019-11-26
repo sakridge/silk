@@ -1623,12 +1623,25 @@ pub mod tests {
         assert_eq!(accounts.load_slow(&ancestors, &pubkey), Some((account, 1)));
     }
 
+    fn print_index(label: &'static str, accounts: &AccountsDB) {
+        info!("accounts.accounts_index roots: {:?}", accounts.accounts_index.read().unwrap().roots);
+        for (pubkey, list) in &accounts.accounts_index.read().unwrap().account_maps {
+            info!("  {}: key: {} slots: {:?}", label, pubkey, list);
+        }
+    }
+
     fn print_count_and_status(label: &'static str, accounts: &AccountsDB) {
-        for (_slot, slot_stores) in &accounts.storage.read().unwrap().0 {
+        let storage = accounts.storage.read().unwrap();
+        let mut slots: Vec<_> = storage.0.keys().cloned().collect();
+        slots.sort();
+        for slot in &slots {
+            let slot_stores = storage.0.get(slot).unwrap();
+
             for (id, entry) in slot_stores {
                 info!(
-                    "{}: {} count_and_status: {:?}",
+                    "{}: slot: {} id: {} count_and_status: {:?}",
                     label,
+                    slot,
                     id,
                     *entry.count_and_status.read().unwrap()
                 );
@@ -1808,8 +1821,20 @@ pub mod tests {
         error!("doesn't fail:");
         assert_load_account(&accounts, current_slot, pubkey, zero_lamport);
 
+        //info!("accounts: {:?}", accounts);
+        print_index("accounts", &accounts);
+        print_count_and_status("accounts", &accounts);
+
         purge_zero_lamport_accounts(&accounts, current_slot);
+
+        //info!("accounts after purge: {:?}", accounts);
+        print_index("accounts_post_purge:", &accounts);
+        print_count_and_status("accounts_post_purge:", &accounts);
         let accounts = reconstruct_accounts_db_via_serialization(accounts, current_slot);
+
+        //info!("accounts reconstructed: {:?}", accounts);
+        print_index("reconstruct:", &accounts);
+        print_count_and_status("reconstruct: ", &accounts);
 
         error!("does fail due to a reconstruction bug:");
         assert_load_account(&accounts, current_slot, pubkey, zero_lamport);
