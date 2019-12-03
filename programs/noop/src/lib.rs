@@ -1,7 +1,7 @@
 use log::*;
 use solana_sdk::account::KeyedAccount;
 use solana_sdk::instruction::InstructionError;
-use solana_sdk::pubkey::Pubkey;
+use solana_keypair::pubkey::Pubkey;
 
 solana_sdk::declare_program!(
     "Noop111111111111111111111111111111111111111",

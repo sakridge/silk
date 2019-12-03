@@ -1,8 +1,8 @@
 use crate::id;
 use crate::{ConfigKeys, ConfigState};
+use solana_keypair::pubkey::Pubkey;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
-    pubkey::Pubkey,
     system_instruction,
 };
 

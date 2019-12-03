@@ -1,5 +1,6 @@
+use crate::clock::Epoch;
 use crate::hash::Hash;
-use crate::{clock::Epoch, pubkey::Pubkey};
+use solana_keypair::pubkey::Pubkey;
 use std::{cmp, fmt, iter::FromIterator};
 
 /// An Account with data that is stored on chain

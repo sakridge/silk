@@ -1,10 +1,8 @@
-use crate::keypair::{keypair_from_seed_phrase, ASK_KEYWORD, SKIP_SEED_PHRASE_VALIDATION_ARG};
 use clap::ArgMatches;
-use solana_sdk::{
-    native_token::sol_to_lamports,
-    pubkey::Pubkey,
-    signature::{read_keypair_file, Keypair, KeypairUtil, Signature},
-};
+use solana_keypair::pubkey::Pubkey;
+use solana_keypair::signature::{read_keypair_file, Keypair, KeypairUtil, Signature};
+use solana_keypair::{keypair_from_seed_phrase, ASK_KEYWORD, SKIP_SEED_PHRASE_VALIDATION_ARG};
+use solana_sdk::native_token::sol_to_lamports;
 use std::str::FromStr;
 
 // Return parsed values from matches at `name`
@@ -77,7 +75,7 @@ pub fn amount_of(matches: &ArgMatches<'_>, name: &str, unit: &str) -> Option<u64
 mod tests {
     use super::*;
     use clap::{App, Arg};
-    use solana_sdk::signature::write_keypair_file;
+    use solana_keypair::signature::write_keypair_file;
     use std::fs;
 
     fn app<'ab, 'v>() -> App<'ab, 'v> {

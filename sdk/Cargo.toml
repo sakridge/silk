@@ -21,7 +21,8 @@ default = [
     "serde_json",
     "ed25519-dalek",
     "solana-logger",
-    "solana-crate-features"
+    "solana-crate-features",
+    "solana-keypair"
 ]
 
 [dependencies]
@@ -48,6 +49,7 @@ serde_json = { version = "1.0.42", optional = true }
 sha2 = "0.8.0"
 ed25519-dalek = { version = "1.0.0-pre.1", optional = true }
 solana-logger = { path = "../logger", version = "0.22.0", optional = true }
+solana-keypair = { path = "../keypair", version = "0.22.0", optional = true }
 solana-crate-features = { path = "../crate-features", version = "0.22.0", optional = true }
 
 [dev-dependencies]

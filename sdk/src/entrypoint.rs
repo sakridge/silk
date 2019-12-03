@@ -2,10 +2,11 @@
 
 extern crate alloc;
 
-use crate::{account_info::AccountInfo, pubkey::Pubkey};
+use crate::account_info::AccountInfo;
 use alloc::vec::Vec;
 use core::mem::size_of;
 use core::slice::{from_raw_parts, from_raw_parts_mut};
+use solana_keypair::pubkey::Pubkey;
 
 /// User implemented program entrypoint
 ///

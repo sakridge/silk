@@ -131,7 +131,7 @@ impl FeeCalculator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pubkey::Pubkey;
+    use solana_keypair::pubkey::Pubkey;
     use crate::system_instruction;
 
     #[test]

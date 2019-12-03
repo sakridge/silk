@@ -3,7 +3,7 @@ use crate::id;
 use crate::spv_state::*;
 use serde_derive::{Deserialize, Serialize};
 use solana_sdk::instruction::{AccountMeta, Instruction};
-use solana_sdk::pubkey::Pubkey;
+use solana_keypair::pubkey::Pubkey;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub enum SpvInstruction {

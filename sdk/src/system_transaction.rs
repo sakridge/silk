@@ -1,12 +1,8 @@
 //! The `system_transaction` module provides functionality for creating system transactions.
 
-use crate::{
-    hash::Hash,
-    pubkey::Pubkey,
-    signature::{Keypair, KeypairUtil},
-    system_instruction,
-    transaction::Transaction,
-};
+use crate::{hash::Hash, system_instruction, transaction::Transaction};
+use solana_keypair::pubkey::Pubkey;
+use solana_keypair::signature::{Keypair, KeypairUtil};
 
 /// Create and sign new SystemInstruction::CreateAccount transaction
 pub fn create_account(

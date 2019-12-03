@@ -1,7 +1,7 @@
-use crate::keypair::ASK_KEYWORD;
+use solana_keypair::pubkey::Pubkey;
+use solana_keypair::signature::{read_keypair_file, Signature};
+use solana_keypair::ASK_KEYWORD;
 use solana_sdk::hash::Hash;
-use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signature::{read_keypair_file, Signature};
 use std::str::FromStr;
 
 // Return an error if a pubkey cannot be parsed.

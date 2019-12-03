@@ -4,10 +4,10 @@ use clap::{
     crate_description, crate_name, values_t_or_exit, App, AppSettings, Arg, ArgMatches, SubCommand,
 };
 use num_cpus;
-use solana_clap_utils::keypair::{
+use solana_keypair::{
     keypair_from_seed_phrase, prompt_passphrase, ASK_KEYWORD, SKIP_SEED_PHRASE_VALIDATION_ARG,
 };
-use solana_sdk::{
+use solana_keypair::{
     pubkey::write_pubkey_file,
     signature::{
         keypair_from_seed, read_keypair, read_keypair_file, write_keypair, write_keypair_file,
@@ -55,7 +55,7 @@ fn output_keypair(
 fn main() -> Result<(), Box<dyn error::Error>> {
     let matches = App::new(crate_name!())
         .about(crate_description!())
-        .version(solana_clap_utils::version!())
+        .version(solana_version::version!())
         .setting(AppSettings::SubcommandRequiredElseHelp)
         .subcommand(
             SubCommand::with_name("new")

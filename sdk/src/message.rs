@@ -2,9 +2,9 @@
 
 use crate::hash::Hash;
 use crate::instruction::{AccountMeta, CompiledInstruction, Instruction};
-use crate::pubkey::Pubkey;
 use crate::short_vec;
 use itertools::Itertools;
+use solana_keypair::pubkey::Pubkey;
 
 fn position(keys: &[Pubkey], key: &Pubkey) -> u8 {
     keys.iter().position(|k| k == key).unwrap() as u8
@@ -246,7 +246,7 @@ impl Message {
 mod tests {
     use super::*;
     use crate::instruction::AccountMeta;
-    use crate::signature::{Keypair, KeypairUtil};
+    use solana_keypair::signature::{Keypair, KeypairUtil};
 
     #[test]
     fn test_message_unique_program_ids() {

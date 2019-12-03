@@ -1,5 +1,6 @@
-use crate::{account::KeyedAccount, instruction::InstructionError, pubkey::Pubkey};
+use crate::{account::KeyedAccount, instruction::InstructionError};
 use num_traits::{FromPrimitive, ToPrimitive};
+use solana_keypair::pubkey::Pubkey;
 
 // All native programs export a symbol named process()
 pub const ENTRYPOINT: &str = "process";
@@ -60,7 +61,7 @@ macro_rules! solana_entrypoint(
 #[macro_export]
 macro_rules! declare_program(
     ($bs58_string:expr, $name:ident, $entrypoint:expr) => (
-        $crate::declare_id!($bs58_string);
+        solana_keypair::declare_id!($bs58_string);
 
         #[macro_export]
         macro_rules! $name {
@@ -71,7 +72,7 @@ macro_rules! declare_program(
 
         #[no_mangle]
         pub extern "C" fn $name(
-            program_id: &$crate::pubkey::Pubkey,
+            program_id: &solana_keypair::pubkey::Pubkey,
             keyed_accounts: &mut [$crate::account::KeyedAccount],
             data: &[u8],
         ) -> Result<(), $crate::instruction::InstructionError> {

@@ -2,14 +2,17 @@ use crate::storage_instruction::StorageAccountType;
 use log::*;
 use num_derive::FromPrimitive;
 use serde_derive::{Deserialize, Serialize};
+
+use solana_keypair::{
+    pubkey::Pubkey,
+    signature::Signature,
+};
 use solana_sdk::{
     account::{Account, KeyedAccount},
     account_utils::State,
     clock::Epoch,
     hash::Hash,
     instruction::InstructionError,
-    pubkey::Pubkey,
-    signature::Signature,
     sysvar,
 };
 use std::collections::BTreeMap;

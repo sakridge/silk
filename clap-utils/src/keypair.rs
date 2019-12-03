@@ -1,26 +1,13 @@
-use crate::ArgConstant;
-use bip39::{Language, Mnemonic, Seed};
 use clap::values_t;
-use rpassword::prompt_password_stderr;
-use solana_sdk::signature::{
-    keypair_from_seed, keypair_from_seed_phrase_and_passphrase, read_keypair_file, Keypair,
-    KeypairUtil,
-};
+use solana_keypair::signature::{read_keypair_file, Keypair, KeypairUtil};
+use solana_keypair::ArgConstant;
+use solana_keypair::{keypair_from_seed_phrase, SKIP_SEED_PHRASE_VALIDATION_ARG};
 use std::error;
-
-// Keyword used to indicate that the user should be asked for a keypair seed phrase
-pub const ASK_KEYWORD: &str = "ASK";
 
 pub const ASK_SEED_PHRASE_ARG: ArgConstant<'static> = ArgConstant {
     long: "ask-seed-phrase",
     name: "ask_seed_phrase",
     help: "Securely recover a keypair using a seed phrase and optional passphrase",
-};
-
-pub const SKIP_SEED_PHRASE_VALIDATION_ARG: ArgConstant<'static> = ArgConstant {
-    long: "skip-seed-phrase-validation",
-    name: "skip_seed_phrase_validation",
-    help: "Skip validation of seed phrases. Use this if your phrase does not use the BIP39 official English word list",
 };
 
 #[derive(Debug, PartialEq)]
@@ -38,41 +25,6 @@ pub struct KeypairWithSource {
 impl KeypairWithSource {
     fn new(keypair: Keypair, source: Source) -> Self {
         Self { keypair, source }
-    }
-}
-
-/// Prompts user for a passphrase and then asks for confirmirmation to check for mistakes
-pub fn prompt_passphrase(prompt: &str) -> Result<String, Box<dyn error::Error>> {
-    let passphrase = prompt_password_stderr(&prompt)?;
-    if !passphrase.is_empty() {
-        let confirmed = rpassword::prompt_password_stderr("Enter same passphrase again: ")?;
-        if confirmed != passphrase {
-            return Err("Passphrases did not match".into());
-        }
-    }
-    Ok(passphrase)
-}
-
-/// Reads user input from stdin to retrieve a seed phrase and passphrase for keypair derivation
-pub fn keypair_from_seed_phrase(
-    keypair_name: &str,
-    skip_validation: bool,
-) -> Result<Keypair, Box<dyn error::Error>> {
-    let seed_phrase = prompt_password_stderr(&format!("[{}] seed phrase: ", keypair_name))?;
-    let seed_phrase = seed_phrase.trim();
-    let passphrase_prompt = format!(
-        "[{}] If this seed phrase has an associated passphrase, enter it now. Otherwise, press ENTER to continue: ",
-        keypair_name,
-    );
-
-    if skip_validation {
-        let passphrase = prompt_passphrase(&passphrase_prompt)?;
-        keypair_from_seed_phrase_and_passphrase(&seed_phrase, &passphrase)
-    } else {
-        let mnemonic = Mnemonic::from_phrase(seed_phrase, Language::English)?;
-        let passphrase = prompt_passphrase(&passphrase_prompt)?;
-        let seed = Seed::new(&mnemonic, &passphrase);
-        keypair_from_seed(seed.as_bytes())
     }
 }
 

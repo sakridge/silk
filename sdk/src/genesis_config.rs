@@ -8,13 +8,13 @@ use crate::{
     hash::{hash, Hash},
     inflation::Inflation,
     poh_config::PohConfig,
-    pubkey::Pubkey,
     rent::Rent,
-    signature::{Keypair, KeypairUtil},
     system_program::{self, solana_system_program},
 };
 use bincode::{deserialize, serialize};
 use memmap::Mmap;
+use solana_keypair::pubkey::Pubkey;
+use solana_keypair::signature::{Keypair, KeypairUtil};
 use std::{
     collections::BTreeMap,
     fs::{File, OpenOptions},
@@ -159,7 +159,7 @@ impl GenesisConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signature::{Keypair, KeypairUtil};
+    use solana_keypair::signature::{Keypair, KeypairUtil};
     use std::path::PathBuf;
 
     fn make_tmp_path(name: &str) -> PathBuf {

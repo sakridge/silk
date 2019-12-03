@@ -1,6 +1,6 @@
 use solana_sdk::hash::Hash;
-use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signature::{Keypair, KeypairUtil};
+use solana_keypair::pubkey::Pubkey;
+use solana_keypair::signature::{Keypair, KeypairUtil};
 use solana_sdk::system_transaction;
 use solana_sdk::transaction::Transaction;
 use std::io::{Error, ErrorKind};

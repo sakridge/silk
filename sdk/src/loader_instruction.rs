@@ -1,6 +1,6 @@
 use crate::instruction::{AccountMeta, Instruction};
-use crate::pubkey::Pubkey;
 use crate::sysvar::rent;
+use solana_keypair::pubkey::Pubkey;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub enum LoaderInstruction {

@@ -11,7 +11,7 @@ use solana_sdk::bpf_loader;
 use solana_sdk::instruction::InstructionError;
 use solana_sdk::instruction_processor_utils::{limited_deserialize, next_keyed_account};
 use solana_sdk::loader_instruction::LoaderInstruction;
-use solana_sdk::pubkey::Pubkey;
+use solana_keypair::pubkey::Pubkey;
 use solana_sdk::sysvar::rent;
 use std::convert::TryFrom;
 use std::io::prelude::*;

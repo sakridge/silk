@@ -41,7 +41,7 @@ where
 mod tests {
     use super::*;
     use crate::account::Account;
-    use crate::pubkey::Pubkey;
+    use solana_keypair::pubkey::Pubkey;
 
     #[test]
     fn test_account_state() {

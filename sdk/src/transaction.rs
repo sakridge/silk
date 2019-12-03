@@ -3,10 +3,10 @@
 use crate::hash::Hash;
 use crate::instruction::{CompiledInstruction, Instruction, InstructionError};
 use crate::message::Message;
-use crate::pubkey::Pubkey;
 use crate::short_vec;
-use crate::signature::{KeypairUtil, Signature};
 use bincode::serialize;
+use solana_keypair::pubkey::Pubkey;
+use solana_keypair::signature::{KeypairUtil, Signature};
 use std::result;
 
 /// Reasons a transaction might be rejected.
@@ -313,7 +313,7 @@ mod tests {
     use super::*;
     use crate::hash::hash;
     use crate::instruction::AccountMeta;
-    use crate::signature::Keypair;
+    use solana_keypair::signature::Keypair;
     use crate::system_instruction;
     use bincode::{deserialize, serialize, serialized_size};
     use std::mem::size_of;

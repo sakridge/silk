@@ -3,12 +3,14 @@ use ed25519_dalek::{SignatureError, KEYPAIR_LENGTH, PUBLIC_KEY_LENGTH};
 use libc::{c_int, size_t};
 use rand_chacha::ChaChaRng;
 use rand_core::SeedableRng;
+use solana_keypair::{
+    pubkey::Pubkey,
+    signature::{Keypair as KeypairNative, KeypairUtil, Signature as SignatureNative},
+};
 use solana_sdk::{
     hash::Hash,
     instruction::CompiledInstruction as CompiledInstructionNative,
     message::{Message as MessageNative, MessageHeader as MessageHeaderNative},
-    pubkey::Pubkey,
-    signature::{Keypair as KeypairNative, KeypairUtil, Signature as SignatureNative},
     transaction::Transaction as TransactionNative,
 };
 use std::{

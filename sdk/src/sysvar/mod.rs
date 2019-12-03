@@ -4,8 +4,8 @@ use crate::{
     account::{Account, KeyedAccount},
     account_info::AccountInfo,
     instruction::InstructionError,
-    pubkey::Pubkey,
 };
+use solana_keypair::pubkey::Pubkey;
 
 pub mod clock;
 pub mod epoch_schedule;
@@ -30,10 +30,10 @@ pub fn is_sysvar_id(id: &Pubkey) -> bool {
 #[macro_export]
 macro_rules! declare_sysvar_id(
     ($name:expr, $type:ty) => (
-        $crate::declare_id!($name);
+        solana_keypair::declare_id!($name);
 
         impl $crate::sysvar::SysvarId for $type {
-            fn check_id(pubkey: &$crate::pubkey::Pubkey) -> bool {
+            fn check_id(pubkey: &solana_keypair::pubkey::Pubkey) -> bool {
                 check_id(pubkey)
             }
         }
@@ -49,7 +49,7 @@ macro_rules! declare_sysvar_id(
 );
 
 // owner pubkey for sysvar accounts
-crate::declare_id!("Sysvar1111111111111111111111111111111111111");
+solana_keypair::declare_id!("Sysvar1111111111111111111111111111111111111");
 
 pub trait SysvarId {
     fn check_id(pubkey: &Pubkey) -> bool;

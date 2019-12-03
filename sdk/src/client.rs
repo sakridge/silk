@@ -8,18 +8,12 @@
 //! them but without waiting to see if the server accepted it.
 
 use crate::{
-    account::Account,
-    clock::Slot,
-    commitment_config::CommitmentConfig,
-    fee_calculator::FeeCalculator,
-    hash::Hash,
-    instruction::Instruction,
-    message::Message,
-    pubkey::Pubkey,
-    signature::{Keypair, Signature},
-    transaction,
-    transport::Result,
+    account::Account, clock::Slot, commitment_config::CommitmentConfig,
+    fee_calculator::FeeCalculator, hash::Hash, instruction::Instruction, message::Message,
+    transaction, transport::Result,
 };
+use solana_keypair::pubkey::Pubkey;
+use solana_keypair::signature::{Keypair, Signature};
 use std::io;
 
 pub trait Client: SyncClient + AsyncClient {

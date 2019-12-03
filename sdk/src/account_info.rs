@@ -1,4 +1,4 @@
-use crate::pubkey::Pubkey;
+use solana_keypair::pubkey::Pubkey;
 use std::{cmp, fmt};
 
 /// AccountInfo

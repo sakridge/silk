@@ -14,7 +14,6 @@ pub mod move_loader;
 pub mod native_loader;
 pub mod native_token;
 pub mod poh_config;
-pub mod pubkey;
 pub mod rent;
 pub mod rpc_port;
 pub mod short_vec;
@@ -41,14 +40,13 @@ pub mod genesis_config;
 #[cfg(not(feature = "program"))]
 pub mod packet;
 #[cfg(not(feature = "program"))]
-pub mod signature;
-#[cfg(not(feature = "program"))]
 pub mod system_transaction;
 #[cfg(not(feature = "program"))]
 pub mod transaction;
 #[cfg(not(feature = "program"))]
 pub mod transport;
 
+extern crate solana_keypair;
 #[macro_use]
 extern crate serde_derive;
 pub extern crate bs58;

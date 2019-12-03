@@ -1,8 +1,8 @@
 use crate::instruction::{AccountMeta, Instruction};
 use crate::instruction_processor_utils::DecodeError;
-use crate::pubkey::Pubkey;
 use crate::system_program;
 use num_derive::{FromPrimitive, ToPrimitive};
+use solana_keypair::pubkey::Pubkey;
 
 #[derive(Serialize, Debug, Clone, PartialEq, FromPrimitive, ToPrimitive)]
 pub enum SystemError {

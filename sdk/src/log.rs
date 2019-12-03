@@ -81,13 +81,13 @@ pub fn sol_log_params(accounts: &[AccountInfo], data: &[u8]) {
         sol_log("- Is signer");
         sol_log_64(0, 0, 0, 0, account.is_signer as u64);
         sol_log("- Key");
-        account.key.log();
+        //account.key.log();
         sol_log("- Lamports");
         sol_log_64(0, 0, 0, 0, *account.lamports);
         sol_log("- Account data length");
         sol_log_64(0, 0, 0, 0, account.data.len() as u64);
         sol_log("- Owner");
-        account.owner.log();
+        //account.owner.log();
     }
     sol_log("Instruction data");
     sol_log_slice(data);

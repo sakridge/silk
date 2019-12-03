@@ -1,10 +1,10 @@
 //! Defines a composable Instruction type and a memory-efficient CompiledInstruction.
 
-use crate::pubkey::Pubkey;
 use crate::short_vec;
 use crate::system_instruction::SystemError;
 use bincode::serialize;
 use serde::Serialize;
+use solana_keypair::pubkey::Pubkey;
 
 /// Reasons the runtime might have rejected an instruction.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
