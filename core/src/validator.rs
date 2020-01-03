@@ -150,6 +150,7 @@ impl Validator {
         // Validator binaries built on a machine with AVX support will generate invalid opcodes
         // when run on machines without AVX causing a non-obvious process abort.  Instead detect
         // the mismatch and error cleanly.
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         #[target_feature(enable = "avx")]
         {
             if is_x86_feature_detected!("avx") {
