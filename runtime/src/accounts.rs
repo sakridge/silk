@@ -132,6 +132,7 @@ impl Accounts {
                     })
                     .unwrap_or_default();
 
+                info!("key: {} account: {:?}", key, accounts);
                 accounts.push(account);
                 tx_rent += rent;
             }

@@ -235,7 +235,7 @@ impl VoteState {
         }
         if slot_hashes[j].1 != vote.hash {
             warn!(
-                "{} dropped vote {:?} failed to match hash {} {}",
+                "{} dropped vote {:?} failed to match vote_hash: {} slot_hash: {}",
                 self.node_pubkey, vote, vote.hash, slot_hashes[j].1
             );
             return Err(VoteError::SlotHashMismatch);
