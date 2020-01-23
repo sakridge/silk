@@ -327,6 +327,10 @@ impl Tower {
                     fork_stake.stake,
                     total_staked
                 );
+                info!("lockouts: {:?} new_lockouts: {:?}", self.lockouts.votes, lockouts.votes);
+                //if lockouts.votes[0].confirmation_count > stake_lockouts.votes[0].confirmation_count {
+                //    return true
+                //}
                 lockout > self.threshold_size
             } else {
                 info!("check_vote_stake_threshold: no fork_stake");
@@ -940,25 +944,34 @@ mod test {
         assert!(tower.last_timestamp.timestamp > timestamp);
     }
 
-    use solana_sdk::signature::Signature;
+    use solana_sdk::signature::{Keypair, Signature, KeypairUtil};
     use rand::{thread_rng, Rng};
+    use crate::replay_stage::{ForkProgress, ReplayStage};
+    use std::sync::RwLock;
 
-    fn new_bank(vote_accounts: &[Pubkey],
-        parent_bank: &Arc<Bank>,
-        bank_forks: &mut BankForks,
+    fn new_bank(parent_bank: &Arc<Bank>,
+        bank_forks: &Arc<RwLock<BankForks>>,
         tower: &mut Tower,
         parent_slot: u64,
         slot: u64,
-        leaders: &[Pubkey],
+        leaders: &[(Keypair, Keypair)],
+        progress: &mut HashMap<u64, ForkProgress>,
     ) -> Arc<Bank> {
         use solana_vote_program::vote_instruction;
         use solana_sdk::transaction::Transaction;
 
-        let bank = Bank::new_from_parent(&parent_bank, &leaders[slot as usize % leaders.len()], slot);
-        bank_forks.insert(bank);
-        let bank = &bank_forks[slot];
+        let leader = leaders[slot as usize % leaders.len()].0.pubkey();
+        let bank = Bank::new_from_parent(&parent_bank, &leader, slot);
+        bank_forks.write().unwrap().insert(bank);
+        let bank = &bank_forks.read().unwrap()[slot];
 
-        let ancestors = bank_forks.ancestors();
+        let ancestors = bank_forks.read().unwrap().ancestors();
+        let _vote_bank = ReplayStage::select_fork(&leaders[0].0.pubkey(),
+            &ancestors,
+            bank_forks,
+            tower,
+            progress,
+            );
 
         let bank_vote_accounts = bank.vote_accounts();
         let (stake_lockouts, total_staked, bank_weight) = tower.collect_vote_lockouts(
@@ -970,38 +983,28 @@ mod test {
         info!("vote_accounts {:?} total_staked: {} weight: {} lockouts: {:?}",
             bank_vote_accounts, total_staked, bank_weight, stake_lockouts);
 
-        let vote_threshold = tower.check_vote_stake_threshold(
-            slot,
-            &stake_lockouts,
-            total_staked,
-        );
-
-        let is_locked_out = tower.is_locked_out(bank.slot(), &ancestors);
-
-        let (vote, tower_index) = tower.new_vote_from_bank(bank, &vote_accounts[0]);
+        let (vote, _tower_index) = tower.new_vote_from_bank(bank, &leaders[0].1.pubkey());
         info!("new vote: {:?}", vote);
         let root = tower.record_bank_vote(vote);
 
-        info!("parent: {} slot: {} vote_threshold: {} lockout: {} root: {:?}",
-            parent_slot, bank.slot(), vote_threshold, is_locked_out, root);
+        info!("parent: {} slot: {} progress: {:?} root: {:?}",
+            parent_slot, bank.slot(), progress.get(&slot).unwrap().fork_stats, root);
 
         if slot < 20 {
-            for leader in leaders {
+            for (node_keypair, voting_keypair) in leaders {
                 let vote_ix = vote_instruction::vote(
-                    &vote_accounts[0],
-                    &leader,
+                    &voting_keypair.pubkey(),
+                    &voting_keypair.pubkey(),
                     tower.last_vote_and_timestamp(),
                 );
 
                 let mut vote_tx =
-                    Transaction::new_with_payer(vec![vote_ix], Some(&leader));
+                    Transaction::new_with_payer(vec![vote_ix], Some(&node_keypair.pubkey()));
 
-                vote_tx.message.recent_blockhash = parent_bank.last_blockhash();
+                let blockhash = parent_bank.last_blockhash();
 
-                let sig: Vec<u8> = (0..64).map(|_| thread_rng().gen()).collect();
-                vote_tx.signatures[0] = Signature::new(&sig);
-                let sig: Vec<u8> = (0..64).map(|_| thread_rng().gen()).collect();
-                vote_tx.signatures.push(Signature::new(&sig));
+                vote_tx.partial_sign(&[node_keypair], blockhash);
+                vote_tx.partial_sign(&[voting_keypair], blockhash);
 
                 bank.process_transaction(&vote_tx).unwrap();
             }
@@ -1014,28 +1017,26 @@ mod test {
         use solana_sdk::message::Message;
         use solana_vote_program::{vote_state::VoteInit, vote_instruction};
         use solana_runtime::genesis_utils::GenesisConfigInfo;
-        use solana_sdk::signature::KeypairUtil;
         use solana_sdk::transaction::Transaction;
 
         solana_logger::setup();
         use solana_runtime::genesis_utils::create_genesis_config;
-        let GenesisConfigInfo { genesis_config, mint_keypair, voting_keypair } = create_genesis_config(1_000_000_000);
-        let mut bank_forks = BankForks::new(0, Bank::new(&genesis_config));
+        let GenesisConfigInfo { genesis_config, mint_keypair, voting_keypair: _ } = create_genesis_config(1_000_000_000);
+        let bank_forks = BankForks::new(0, Bank::new(&genesis_config));
         let num_nodes = 10;
-        let leaders: Vec<_> = (0..num_nodes).into_iter().map(|_| Pubkey::new_rand()).collect();
-        let vote_accounts: Vec<_> = (0..num_nodes).into_iter().map(|_| Pubkey::new_rand()).collect();
-        let mut tower = Tower::new(&leaders[0], &vote_accounts[0], &bank_forks);
+        let leaders: Vec<_> = (0..num_nodes).into_iter().map(|_| (Keypair::new(), Keypair::new())).collect();
+        let mut tower = Tower::new(&leaders[0].0.pubkey(), &leaders[0].1.pubkey(), &bank_forks);
 
         let mut parent_bank = Arc::new(Bank::new(&genesis_config));
 
-        for (vote_pubkey, node_pubkey) in vote_accounts.iter().zip(leaders.iter()) {
+        for (node_key, vote_key) in &leaders {
             let message = Message::new(vote_instruction::create_account(
                 &mint_keypair.pubkey(),
-                &vote_pubkey,
+                &vote_key.pubkey(),
                 &VoteInit {
-                    node_pubkey: *node_pubkey,
-                    authorized_voter: *vote_pubkey,
-                    authorized_withdrawer: *vote_pubkey,
+                    node_pubkey: node_key.pubkey(),
+                    authorized_voter: vote_key.pubkey(),
+                    authorized_withdrawer: vote_key.pubkey(),
                     commission: 50,
                 },
                 10,
@@ -1045,25 +1046,27 @@ mod test {
             let sig: Vec<u8> = (0..64).map(|_| thread_rng().gen()).collect();
             tx.signatures[0] = Signature::new(&sig);
             parent_bank.process_transaction(&tx).unwrap();
-            parent_bank.transfer(10_000, &mint_keypair, node_pubkey).unwrap();
+            parent_bank.transfer(10_000, &mint_keypair, &node_key.pubkey()).unwrap();
         }
 
+        let bank_forks = Arc::new(RwLock::new(bank_forks));
+        let mut progress = HashMap::new();
         let base = 38;
         for slot in 1..base {
             let parent_slot: u64 = slot - 1;
-            parent_bank = new_bank(&vote_accounts, &parent_bank, &mut bank_forks, &mut tower, parent_slot, slot, &leaders);
+            parent_bank = new_bank(&parent_bank, &bank_forks, &mut tower, parent_slot, slot, &leaders, &mut progress);
         }
         let fork_len = 8;
         let mut parent_slot = base - 1;
         for slot in base..base + fork_len {
             info!("parent: {} slot: {}", parent_slot, slot);
-            parent_bank = new_bank(&vote_accounts, &parent_bank, &mut bank_forks, &mut tower, parent_slot, slot, &leaders);
+            parent_bank = new_bank(&parent_bank, &bank_forks, &mut tower, parent_slot, slot, &leaders, &mut progress);
             parent_slot = slot;
         }
         let mut parent_slot = base - 1;
         for slot in (base + fork_len)..(base + fork_len + 20) {
             info!("parent: {} slot: {}", parent_slot, slot);
-            parent_bank = new_bank(&vote_accounts, &parent_bank, &mut bank_forks, &mut tower, parent_slot, slot, &leaders);
+            parent_bank = new_bank(&parent_bank, &bank_forks, &mut tower, parent_slot, slot, &leaders, &mut progress);
             parent_slot = slot;
         }
     }

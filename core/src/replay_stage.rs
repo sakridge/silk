@@ -94,7 +94,7 @@ struct ReplaySlotStats {
 }
 
 #[derive(Debug, Clone, Default)]
-struct ForkStats {
+pub struct ForkStats {
     weight: u128,
     fork_weight: u128,
     total_staked: u64,
@@ -149,7 +149,7 @@ impl ReplaySlotStats {
     }
 }
 
-struct ForkProgress {
+pub struct ForkProgress {
     last_entry: Hash,
     num_shreds: usize,
     num_entries: usize,
@@ -157,7 +157,7 @@ struct ForkProgress {
     started_ms: u64,
     is_dead: bool,
     stats: ReplaySlotStats,
-    fork_stats: ForkStats,
+    pub fork_stats: ForkStats,
 }
 
 impl ForkProgress {
@@ -795,7 +795,7 @@ impl ReplayStage {
         did_complete_bank
     }
 
-    fn select_fork(
+    pub fn select_fork(
         my_pubkey: &Pubkey,
         ancestors: &HashMap<u64, HashSet<u64>>,
         bank_forks: &Arc<RwLock<BankForks>>,
