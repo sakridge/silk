@@ -317,6 +317,7 @@ impl Tower {
         let mut lockouts = self.lockouts.clone();
         lockouts.process_slot_vote_unchecked(slot);
         let vote = lockouts.nth_recent_vote(self.threshold_depth);
+        trace!("getting {}th vote", self.threshold_depth);
         if let Some(vote) = vote {
             if let Some(fork_stake) = stake_lockouts.get(&vote.slot) {
                 let lockout = fork_stake.stake as f64 / total_staked as f64;
@@ -327,6 +328,7 @@ impl Tower {
                     fork_stake.stake,
                     total_staked
                 );
+                trace!("new: {:?} old: {:?}", lockouts.votes, self.lockouts.votes);
                 for (new_lockout, original_lockout) in
                     lockouts.votes.iter().zip(self.lockouts.votes.iter())
                 {
@@ -342,10 +344,13 @@ impl Tower {
                     }
                 }
                 true
+            //lockout > self.threshold_size
             } else {
+                trace!("no stake for {}", vote.slot);
                 false
             }
         } else {
+            trace!("no vote.. votes: {:?}", self.lockouts.votes);
             true
         }
     }
