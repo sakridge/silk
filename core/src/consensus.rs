@@ -281,6 +281,11 @@ impl Tower {
     }
 
     pub fn is_locked_out(&self, slot: Slot, ancestors: &HashMap<Slot, HashSet<Slot>>) -> bool {
+        let mut last_slot = HashSet::new();
+        self.is_locked_out_ext(slot, ancestors, &mut last_slot)
+    }
+
+    pub fn is_locked_out_ext(&self, slot: Slot, ancestors: &HashMap<Slot, HashSet<Slot>>, slots: &mut HashSet<u64>) -> bool {
         assert!(ancestors.contains_key(&slot));
 
         if !self.is_recent(slot) {
@@ -295,6 +300,10 @@ impl Tower {
                 continue;
             }
             if !ancestors[&slot].contains(&vote.slot) {
+                if !slots.contains(&slot) {
+                    warn!("{} locked out on: {:?}", slot, vote);
+                    slots.insert(slot);
+                }
                 return true;
             }
         }
@@ -329,7 +338,7 @@ impl Tower {
                     total_staked
                 );
                 trace!("new: {:?} old: {:?}", lockouts.votes, self.lockouts.votes);
-                for (new_lockout, original_lockout) in
+                /*for (new_lockout, original_lockout) in
                     lockouts.votes.iter().zip(self.lockouts.votes.iter())
                 {
                     if new_lockout.slot == original_lockout.slot {
@@ -343,8 +352,8 @@ impl Tower {
                         break;
                     }
                 }
-                true
-            //lockout > self.threshold_size
+                true*/
+                lockout > self.threshold_size
             } else {
                 trace!("no stake for {}", vote.slot);
                 false
