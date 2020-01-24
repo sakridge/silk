@@ -161,11 +161,11 @@ impl MetricsAgent {
         let num_points = points.len();
         debug!("run: attempting to write {} points", num_points);
         if num_points > max_points {
-            warn!(
+            /*warn!(
                 "max submission rate of {} datapoints per second exceeded.  only the
                     first {} of {} points will be submitted",
                 max_points_per_sec, max_points, num_points
-            );
+            );*/
         }
         let points_written = cmp::min(num_points, max_points - 1);
         points.truncate(points_written);
@@ -210,7 +210,7 @@ impl MetricsAgent {
                         barrier.wait();
                     }
                     MetricsCommand::Submit(point, level) => {
-                        log!(level, "{}", point);
+                        //log!(level, "{}", point);
                         let (_, _, points) = points_map.entry(level).or_insert((
                             last_write_time,
                             HashMap::new(),

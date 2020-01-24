@@ -195,6 +195,7 @@ impl ReplayStage {
         let t_replay = Builder::new()
             .name("solana-replay-stage".to_string())
             .spawn(move || {
+                let mut last_voted: u64 = 0;
                 let verify_recyclers = VerifyRecyclers::default();
                 let _exit = Finalizer::new(exit.clone());
                 let mut progress = HashMap::new();
@@ -205,6 +206,7 @@ impl ReplayStage {
                 let mut current_leader = None;
                 let mut last_reset = Hash::default();
                 let mut partition = false;
+                let mut select_fork_last_slot = HashSet::new();
                 loop {
                     let allocated = thread_mem_usage::Allocatedp::default();
 
@@ -257,6 +259,7 @@ impl ReplayStage {
                             &bank_forks,
                             &tower,
                             &mut progress,
+                            &mut select_fork_last_slot,
                         );
                         datapoint_debug!(
                             "replay_stage-memory",
@@ -270,7 +273,7 @@ impl ReplayStage {
                         let mut vote_bank_slot = None;
                         let start = allocated.get();
                         if !stats.is_locked_out && stats.vote_threshold {
-                            info!("voting: {} {}", bank.slot(), stats.fork_weight);
+                            warn!("{} voting: {} weight: {}", my_pubkey, bank.slot(), stats.fork_weight);
                             subscriptions.notify_subscribers(bank.slot(), &bank_forks);
                             if let Some(votable_leader) =
                                 leader_schedule_cache.slot_leader_at(bank.slot(), Some(&bank))
@@ -299,6 +302,12 @@ impl ReplayStage {
                                 &snapshot_package_sender,
                                 &latest_root_senders,
                             )?;
+                        } else {
+                            if last_voted != bank.slot() {
+                                warn!("{} not voting: slot: {} locked_out: {} threshold: {}",
+                                    my_pubkey, bank.slot(), stats.is_locked_out, stats.vote_threshold);
+                                last_voted = bank.slot();
+                            }
                         }
                         datapoint_debug!(
                             "replay_stage-memory",
@@ -315,8 +324,9 @@ impl ReplayStage {
                             );
                             last_reset = bank.last_blockhash();
                             tpu_has_bank = false;
-                            info!(
-                                "vote bank: {:?} reset bank: {}",
+                            warn!(
+                                "{} vote bank: {:?} reset bank: {}",
+                                my_pubkey,
                                 vote_bank_slot,
                                 bank.slot()
                             );
@@ -489,7 +499,7 @@ impl ReplayStage {
             );
 
             let root_slot = bank_forks.read().unwrap().root();
-            info!(
+            warn!(
                 "new fork:{} parent:{} (leader) root:{}",
                 poh_slot, parent_slot, root_slot
             );
@@ -745,6 +755,7 @@ impl ReplayStage {
         bank_forks: &Arc<RwLock<BankForks>>,
         tower: &Tower,
         progress: &mut HashMap<u64, ForkProgress>,
+        last_slots: &mut HashSet<u64>,
     ) -> VoteAndPoHBank {
         let tower_start = Instant::now();
 
@@ -816,7 +827,7 @@ impl ReplayStage {
                     &stats.stake_lockouts,
                     stats.total_staked,
                 );
-                stats.is_locked_out = tower.is_locked_out(bank.slot(), &ancestors);
+                stats.is_locked_out = tower.is_locked_out_ext(bank.slot(), &ancestors, last_slots);
                 stats.has_voted = tower.has_voted(bank.slot());
                 stats.is_recent = tower.is_recent(bank.slot());
                 progress
@@ -890,7 +901,7 @@ impl ReplayStage {
                         .map(|s| s.is_frozen())
                         .unwrap_or(true)
                 {
-                    info!("validator fork confirmed {} {}ms", *slot, duration);
+                    warn!("validator fork confirmed {} {}ms", *slot, duration);
                     datapoint_warn!("validator-confirmation", ("duration_ms", duration, i64));
                     prog.fork_stats.confirmation_reported = true;
                 } else {
@@ -959,7 +970,7 @@ impl ReplayStage {
                 let leader = leader_schedule_cache
                     .slot_leader_at(child_slot, Some(&parent_bank))
                     .unwrap();
-                info!(
+                warn!(
                     "new fork:{} parent:{} root:{}",
                     child_slot,
                     parent_slot,
