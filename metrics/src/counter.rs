@@ -177,14 +177,14 @@ impl Counter {
         let metricsrate = self.metricsrate.load(Ordering::Relaxed);
 
         if times % lograte == 0 && times > 0 && log_enabled!(level) {
-            log!(level,
+            /*log!(level,
                 "COUNTER:{{\"name\": \"{}\", \"counts\": {}, \"samples\": {},  \"now\": {}, \"events\": {}}}",
                 self.name,
                 counts + events,
                 times,
                 now,
                 events,
-            );
+            );*/
         }
 
         let lastlog = self.lastlog.load(Ordering::Relaxed);

@@ -285,7 +285,12 @@ impl Tower {
         self.is_locked_out_ext(slot, ancestors, &mut last_slot)
     }
 
-    pub fn is_locked_out_ext(&self, slot: Slot, ancestors: &HashMap<Slot, HashSet<Slot>>, slots: &mut HashSet<u64>) -> bool {
+    pub fn is_locked_out_ext(
+        &self,
+        slot: Slot,
+        ancestors: &HashMap<Slot, HashSet<Slot>>,
+        slots: &mut HashSet<u64>,
+    ) -> bool {
         assert!(ancestors.contains_key(&slot));
 
         if !self.is_recent(slot) {
@@ -301,7 +306,10 @@ impl Tower {
             }
             if !ancestors[&slot].contains(&vote.slot) {
                 if !slots.contains(&slot) {
-                    warn!("{} locked out on: {:?}", slot, vote);
+                    warn!(
+                        "{} slot: {} locked out on: {:?}",
+                        self.node_pubkey, slot, vote
+                    );
                     slots.insert(slot);
                 }
                 return true;
@@ -323,11 +331,23 @@ impl Tower {
         stake_lockouts: &HashMap<u64, StakeLockout>,
         total_staked: u64,
     ) -> bool {
+        let mut info = Lockout::default();
+        self.check_vote_stake_threshold_ext(slot, stake_lockouts, total_staked, &mut info)
+    }
+
+    pub fn check_vote_stake_threshold_ext(
+        &self,
+        slot: u64,
+        stake_lockouts: &HashMap<u64, StakeLockout>,
+        total_staked: u64,
+        info: &mut Lockout,
+    ) -> bool {
         let mut lockouts = self.lockouts.clone();
         lockouts.process_slot_vote_unchecked(slot);
         let vote = lockouts.nth_recent_vote(self.threshold_depth);
         trace!("getting {}th vote", self.threshold_depth);
         if let Some(vote) = vote {
+            *info = vote.clone();
             if let Some(fork_stake) = stake_lockouts.get(&vote.slot) {
                 let lockout = fork_stake.stake as f64 / total_staked as f64;
                 trace!(

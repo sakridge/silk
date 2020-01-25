@@ -25,7 +25,7 @@ impl LeaderSchedule {
         let rng = &mut ChaChaRng::from_seed(seed);
         let weighted_index = WeightedIndex::new(stakes).unwrap();
         let mut current_node = Pubkey::default();
-        let slot_leaders = (0..len)
+        let slot_leaders: Vec<_> = (0..len)
             .map(|i| {
                 if i % repeat == 0 {
                     current_node = ids[weighted_index.sample(rng)];
@@ -35,10 +35,12 @@ impl LeaderSchedule {
                 }
             })
             .collect();
+        warn!("calculated slot leaders: {}", slot_leaders.len());
         Self { slot_leaders }
     }
 
     pub fn new_from_schedule(slot_leaders: Vec<Pubkey>) -> Self {
+        warn!("new slot leaders: {}", slot_leaders.len());
         Self { slot_leaders }
     }
 

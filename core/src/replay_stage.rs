@@ -31,6 +31,7 @@ use solana_sdk::{
     transaction::Transaction,
 };
 use solana_vote_program::vote_instruction;
+use solana_vote_program::vote_state::Lockout;
 use std::{
     collections::{HashMap, HashSet},
     result,
@@ -115,6 +116,7 @@ struct ForkStats {
     stake_lockouts: HashMap<u64, StakeLockout>,
     computed: bool,
     confirmation_reported: bool,
+    threshold_vote: Lockout,
 }
 
 impl ReplaySlotStats {
@@ -219,6 +221,7 @@ impl ReplayStage {
 
                     let start = allocated.get();
                     Self::generate_new_bank_forks(
+                        &my_pubkey,
                         &blockstore,
                         &bank_forks,
                         &leader_schedule_cache,
@@ -304,8 +307,8 @@ impl ReplayStage {
                             )?;
                         } else {
                             if last_voted != bank.slot() {
-                                warn!("{} not voting: slot: {} locked_out: {} threshold: {}",
-                                    my_pubkey, bank.slot(), stats.is_locked_out, stats.vote_threshold);
+                                warn!("{} not voting: slot: {} locked_out: {} threshold: {} threshold_vote: {:?}",
+                                    my_pubkey, bank.slot(), stats.is_locked_out, stats.vote_threshold, stats.threshold_vote);
                                 last_voted = bank.slot();
                             }
                         }
@@ -454,10 +457,10 @@ impl ReplayStage {
             poh_recorder.lock().unwrap().reached_leader_slot();
 
         if !reached_leader_slot {
-            trace!("{} poh_recorder hasn't reached_leader_slot", my_pubkey);
+            info!("{} poh_recorder hasn't reached_leader_slot", my_pubkey);
             return;
         }
-        trace!("{} reached_leader_slot", my_pubkey);
+        warn!("{} reached_leader_slot", my_pubkey);
 
         let parent = bank_forks
             .read()
@@ -480,11 +483,9 @@ impl ReplayStage {
         );
 
         if let Some(next_leader) = leader_schedule_cache.slot_leader_at(poh_slot, Some(&parent)) {
-            trace!(
+            info!(
                 "{} leader {} at poh slot: {}",
-                my_pubkey,
-                next_leader,
-                poh_slot
+                my_pubkey, next_leader, poh_slot
             );
 
             // I guess I missed my slot
@@ -500,8 +501,8 @@ impl ReplayStage {
 
             let root_slot = bank_forks.read().unwrap().root();
             warn!(
-                "new fork:{} parent:{} (leader) root:{}",
-                poh_slot, parent_slot, root_slot
+                "{} new fork:{} parent:{} (leader) root:{}",
+                my_pubkey, poh_slot, parent_slot, root_slot
             );
             subscriptions.notify_slot(poh_slot, parent_slot, root_slot);
             let tpu_bank = bank_forks
@@ -822,11 +823,14 @@ impl ReplayStage {
                     stats.block_height = bank.block_height();
                     stats.computed = true;
                 }
-                stats.vote_threshold = tower.check_vote_stake_threshold(
+                let mut info = Lockout::default();
+                stats.vote_threshold = tower.check_vote_stake_threshold_ext(
                     bank.slot(),
                     &stats.stake_lockouts,
                     stats.total_staked,
+                    &mut info,
                 );
+                stats.threshold_vote = info;
                 stats.is_locked_out = tower.is_locked_out_ext(bank.slot(), &ancestors, last_slots);
                 stats.has_voted = tower.has_voted(bank.slot());
                 stats.is_recent = tower.is_recent(bank.slot());
@@ -938,6 +942,7 @@ impl ReplayStage {
     }
 
     fn generate_new_bank_forks(
+        my_pubkey: &Pubkey,
         blockstore: &Blockstore,
         forks_lock: &RwLock<BankForks>,
         leader_schedule_cache: &Arc<LeaderScheduleCache>,
@@ -971,10 +976,12 @@ impl ReplayStage {
                     .slot_leader_at(child_slot, Some(&parent_bank))
                     .unwrap();
                 warn!(
-                    "new fork:{} parent:{} root:{}",
+                    "{} new fork:{} parent:{} root:{} leader: {}",
+                    my_pubkey,
                     child_slot,
                     parent_slot,
-                    forks.root()
+                    forks.root(),
+                    leader,
                 );
                 subscriptions.notify_slot(child_slot, parent_slot, forks.root());
                 new_banks.insert(
@@ -1234,6 +1241,7 @@ pub(crate) mod tests {
                     &wrapped_bank_fork,
                     &towers[i],
                     &mut fork_progresses[i],
+                    &mut HashSet::new(),
                 );
 
                 if response.is_none() {
@@ -1333,6 +1341,7 @@ pub(crate) mod tests {
             assert!(bank_forks.get(1).is_none());
             let bank_forks = RwLock::new(bank_forks);
             ReplayStage::generate_new_bank_forks(
+                &Pubkey::new_rand(),
                 &blockstore,
                 &bank_forks,
                 &leader_schedule_cache,
@@ -1345,6 +1354,7 @@ pub(crate) mod tests {
             blockstore.insert_shreds(shreds, None, false).unwrap();
             assert!(bank_forks.read().unwrap().get(2).is_none());
             ReplayStage::generate_new_bank_forks(
+                &Pubkey::new_rand(),
                 &blockstore,
                 &bank_forks,
                 &leader_schedule_cache,
