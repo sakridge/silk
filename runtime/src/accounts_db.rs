@@ -758,13 +758,9 @@ impl AccountsDB {
                     .get(&slot)
                     .and_then(|storage_map| storage_map.get(&account_info.store_id))
                     .and_then(|store| {
-                        Some(
-                            store
-                                .accounts
-                                .get_account(account_info.offset)?
-                                .0
-                                .clone_account(),
-                        )
+                        let acc = store.accounts.get_account(account_info.offset);
+                        let acc = acc?;
+                        Some(acc.0.clone_account())
                     })
                     .map(|account| (pubkey, account, slot)),
             )
@@ -1246,13 +1242,21 @@ impl AccountsDB {
             "here starting from: {:?}",
             start_accumulator[0].value.0.to_string_radix(16)
         );
+        {
+            let accounts_index = self.accounts_index.read().unwrap();
+            for (key, slots) in &accounts_index.account_maps {
+                info!("key: {} slots: {:?}", key, slots);
+            }
+        }
         let (mut accumulators, mismatch_found) = self.scan_accounts(
             ancestors,
             |(collector, mismatch_found): &mut (Vec<Vec<AccountAccumulator>>, bool),
              option: Option<(&Pubkey, Account, Slot)>| {
                 if let Some((pubkey, account, slot)) = option {
+                    info!("verify: {} account: {:?} slot: {}", pubkey, account, slot);
                     let hash = Self::hash_account(slot, &account, pubkey);
                     if hash != account.hash {
+                        info!("hash mismatch!");
                         *mismatch_found = true;
                         return;
                     }
@@ -1274,6 +1278,8 @@ impl AccountsDB {
                     if *mismatch_found {
                         return;
                     }
+                } else {
+                    info!("none?");
                 }
             },
         );

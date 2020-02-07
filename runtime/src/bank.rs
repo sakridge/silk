@@ -722,11 +722,13 @@ impl Bank {
         let mut hash = self.hash.write().unwrap();
 
         if *hash == Hash::default() {
+            info!("collecting fees {}", self.slot());
             // finish up any deferred changes to account state
             self.collect_fees();
             self.distribute_rent();
             self.update_slot_history();
 
+            info!("done with fees");
             // freeze is a one-way trip, idempotent
             *hash = self.hash_internal_state();
         }
