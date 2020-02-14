@@ -78,6 +78,8 @@ pub fn package_snapshot<P: AsRef<Path>, Q: AsRef<Path>>(
     snapshot_path: Q,
     slots_to_snapshot: &[Slot],
 ) -> Result<SnapshotPackage> {
+    bank.update_accounts_hash();
+
     // Hard link all the snapshots we need for this package
     let snapshot_hard_links_dir = tempfile::tempdir_in(snapshot_path)?;
 

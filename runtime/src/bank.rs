@@ -1876,6 +1876,13 @@ impl Bank {
         }
     }
 
+    pub fn update_accounts_hash(&self) {
+        self.rc
+            .accounts
+            .accounts_db
+            .update_accounts_hash(self.slot(), &self.ancestors);
+    }
+
     /// A snapshot bank should be purged of 0 lamport accounts which are not part of the hash
     /// calculation and could shield other real accounts.
     pub fn verify_snapshot_bank(&self) -> bool {
@@ -3139,6 +3146,7 @@ mod tests {
         assert_eq!(bank0.get_account(&keypair.pubkey()).unwrap().lamports, 10);
         assert_eq!(bank1.get_account(&keypair.pubkey()), None);
 
+        bank0.update_accounts_hash();
         assert!(bank0.verify_bank_hash());
 
         // Squash and then verify hash_internal value
@@ -3146,6 +3154,7 @@ mod tests {
         assert!(bank0.verify_bank_hash());
 
         bank1.squash();
+        bank1.update_accounts_hash();
         assert!(bank1.verify_bank_hash());
 
         // keypair should have 0 tokens on both forks
@@ -3874,6 +3883,7 @@ mod tests {
         let pubkey2 = Pubkey::new_rand();
         info!("transfer 2 {}", pubkey2);
         bank2.transfer(10, &mint_keypair, &pubkey2).unwrap();
+        bank2.update_accounts_hash();
         assert!(bank2.verify_bank_hash());
     }
 
@@ -3890,22 +3900,25 @@ mod tests {
         let bank0_state = bank0.hash_internal_state();
         let bank0 = Arc::new(bank0);
         // Checkpointing should result in a new state while freezing the parent
-        let bank2 = new_from_parent(&bank0);
+        let bank2 = Bank::new_from_parent(&bank0, &Pubkey::new_rand(), 1);
         assert_ne!(bank0_state, bank2.hash_internal_state());
         // Checkpointing should modify the checkpoint's state when freezed
         assert_ne!(bank0_state, bank0.hash_internal_state());
 
         // Checkpointing should never modify the checkpoint's state once frozen
         let bank0_state = bank0.hash_internal_state();
+        bank2.update_accounts_hash();
         assert!(bank2.verify_bank_hash());
-        let bank3 = new_from_parent(&bank0);
+        let bank3 = Bank::new_from_parent(&bank0, &Pubkey::new_rand(), 2);
         assert_eq!(bank0_state, bank0.hash_internal_state());
         assert!(bank2.verify_bank_hash());
+        bank3.update_accounts_hash();
         assert!(bank3.verify_bank_hash());
 
         let pubkey2 = Pubkey::new_rand();
         info!("transfer 2 {}", pubkey2);
         bank2.transfer(10, &mint_keypair, &pubkey2).unwrap();
+        bank2.update_accounts_hash();
         assert!(bank2.verify_bank_hash());
         assert!(bank3.verify_bank_hash());
     }
@@ -3926,6 +3939,7 @@ mod tests {
 
         bank.transfer(1_000, &mint_keypair, &pubkey).unwrap();
         bank.freeze();
+        bank.update_accounts_hash();
         assert!(bank.verify_snapshot_bank());
 
         // tamper the bank after freeze!
@@ -4475,9 +4489,9 @@ mod tests {
         let bank0 = Arc::new(Bank::new(&genesis_config));
 
         // Bank 1
-        let bank1 = Arc::new(new_from_parent(&bank0));
+        let bank1 = Arc::new(Bank::new_from_parent(&bank0, &Pubkey::new_rand(), 1));
         // Bank 2
-        let bank2 = new_from_parent(&bank0);
+        let bank2 = Bank::new_from_parent(&bank0, &Pubkey::new_rand(), 2);
 
         // transfer a token
         assert_eq!(
@@ -4500,7 +4514,7 @@ mod tests {
         assert_eq!(bank2.transaction_count(), 0);
         assert_eq!(bank1.transaction_count(), 1);
 
-        let bank6 = new_from_parent(&bank1);
+        let bank6 = Bank::new_from_parent(&bank1, &Pubkey::new_rand(), 3);
         assert_eq!(bank1.transaction_count(), 1);
         assert_eq!(bank6.transaction_count(), 1);
 

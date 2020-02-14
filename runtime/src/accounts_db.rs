@@ -403,6 +403,7 @@ impl BankHashStats {
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq)]
 pub struct BankHashInfo {
     pub hash: BankHash,
+    pub snapshot_hash: Hash,
     pub stats: BankHashStats,
 }
 
@@ -793,6 +794,7 @@ impl AccountsDB {
         let hash = hash_info.hash;
         let new_hash_info = BankHashInfo {
             hash,
+            snapshot_hash: Hash::default(),
             stats: BankHashStats::default(),
         };
         bank_hashes.insert(slot, new_hash_info);
@@ -1047,16 +1049,14 @@ impl AccountsDB {
         datapoint_info!("accounts_db-stores", ("total_count", total_count, i64));
     }
 
-    pub fn verify_bank_hash(
+    fn calculate_accounts_hash(
         &self,
-        slot: Slot,
         ancestors: &HashMap<Slot, usize>,
-    ) -> Result<(), BankHashVerificationError> {
+    ) -> Result<Hash, BankHashVerificationError> {
         use BankHashVerificationError::*;
-
-        let (hashes, mismatch_found) = self.scan_accounts(
+        let (mut hashes, mismatch_found) = self.scan_accounts(
             ancestors,
-            |(collector, mismatch_found): &mut (Vec<BankHash>, bool),
+            |(collector, mismatch_found): &mut (Vec<(Pubkey, Hash)>, bool),
              option: Option<(&Pubkey, Account, Slot)>| {
                 if let Some((pubkey, account, slot)) = option {
                     let hash = Self::hash_account(slot, &account, pubkey);
@@ -1066,27 +1066,47 @@ impl AccountsDB {
                     if *mismatch_found {
                         return;
                     }
-                    let hash = BankHash::from_hash(&hash);
                     debug!("xoring..{} key: {}", hash, pubkey);
-                    collector.push(hash);
+                    collector.push((*pubkey, hash));
                 }
             },
         );
         if mismatch_found {
             return Err(MismatchedAccountHash);
         }
-        let mut calculated_hash = BankHash::default();
-        for hash in hashes {
-            calculated_hash.xor(hash);
+        hashes.par_sort_by(|a, b| a.0.cmp(&b.0));
+        let mut hasher = Hasher::default();
+        for hash in &hashes {
+            hasher.hash(hash.1.as_ref());
         }
+
+        Ok(hasher.result())
+    }
+
+    pub fn update_accounts_hash(&self, slot: Slot, ancestors: &HashMap<Slot, usize>) {
+        let hash = self.calculate_accounts_hash(ancestors).unwrap();
+        let mut bank_hashes = self.bank_hashes.write().unwrap();
+        let mut bank_hash_info = bank_hashes.get_mut(&slot).unwrap();
+        bank_hash_info.snapshot_hash = hash;
+    }
+
+    pub fn verify_bank_hash(
+        &self,
+        slot: Slot,
+        ancestors: &HashMap<Slot, usize>,
+    ) -> Result<(), BankHashVerificationError> {
+        use BankHashVerificationError::*;
+
+        let calculated_hash = self.calculate_accounts_hash(ancestors)?;
+
         let bank_hashes = self.bank_hashes.read().unwrap();
         if let Some(found_hash_info) = bank_hashes.get(&slot) {
-            if calculated_hash == found_hash_info.hash {
+            if calculated_hash == found_hash_info.snapshot_hash {
                 Ok(())
             } else {
                 warn!(
                     "mismatched bank hash for slot {}: {} (calculated) != {} (expected)",
-                    slot, calculated_hash, found_hash_info.hash
+                    slot, calculated_hash, found_hash_info.snapshot_hash
                 );
                 Err(MismatchedBankHash)
             }
@@ -2389,6 +2409,7 @@ pub mod tests {
 
         db.store(some_slot, &[(&key, &account)]);
         db.add_root(some_slot);
+        db.update_accounts_hash(some_slot, &ancestors);
         assert_matches!(db.verify_bank_hash(some_slot, &ancestors), Ok(_));
 
         db.bank_hashes.write().unwrap().remove(&some_slot).unwrap();
@@ -2400,6 +2421,7 @@ pub mod tests {
         let some_bank_hash = BankHash::from_hash(&Hash::new(&[0xca; HASH_BYTES]));
         let bank_hash_info = BankHashInfo {
             hash: some_bank_hash,
+            snapshot_hash: Hash::new(&[0xca; HASH_BYTES]),
             stats: BankHashStats::default(),
         };
         db.bank_hashes
@@ -2425,6 +2447,7 @@ pub mod tests {
             .unwrap()
             .insert(some_slot, BankHashInfo::default());
         db.add_root(some_slot);
+        db.update_accounts_hash(some_slot, &ancestors);
         assert_matches!(db.verify_bank_hash(some_slot, &ancestors), Ok(_));
     }
 
