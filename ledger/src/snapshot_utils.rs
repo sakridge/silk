@@ -78,8 +78,7 @@ pub fn package_snapshot<P: AsRef<Path>, Q: AsRef<Path>>(
     snapshot_path: Q,
     slots_to_snapshot: &[Slot],
 ) -> Result<SnapshotPackage> {
-    bank.update_accounts_hash();
-
+    let hash = bank.get_accounts_hash();
     // Hard link all the snapshots we need for this package
     let snapshot_hard_links_dir = tempfile::tempdir_in(snapshot_path)?;
 
@@ -108,6 +107,7 @@ pub fn package_snapshot<P: AsRef<Path>, Q: AsRef<Path>>(
         snapshot_hard_links_dir,
         account_storage_entries,
         snapshot_package_output_file.as_ref().to_path_buf(),
+        hash,
     );
 
     Ok(package)
@@ -316,6 +316,7 @@ where
 
 pub fn add_snapshot<P: AsRef<Path>>(snapshot_path: P, bank: &Bank) -> Result<SlotSnapshotPaths> {
     bank.purge_zero_lamport_accounts();
+    bank.update_accounts_hash();
     let slot = bank.slot();
     // snapshot_path/slot
     let slot_snapshot_dir = get_bank_snapshot_dir(snapshot_path, slot);

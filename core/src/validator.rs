@@ -343,6 +343,30 @@ impl Validator {
                 .set_entrypoint(entrypoint_info.clone());
         }
 
+        if let Some(ref snapshot_config) = config.snapshot_config {
+            if !snapshot_config.trusted_validators.is_empty() {
+                let root = bank_forks.read().unwrap().root();
+                let root_bank = &bank_forks.read().unwrap()[root];
+                let snapshot_hash = root_bank.get_accounts_hash();
+                let mut seen_ids = snapshot_config.trusted_validators.clone();
+                info!("Waiting to see if trusted validators have the same snapshot hash values");
+                for _ in 0..10 {
+                    let ids = cluster_info.read().unwrap().get_snapshot_hash(root);
+                    for (id, hash) in &ids {
+                        if *hash == snapshot_hash {
+                            seen_ids.remove(id);
+                        }
+                        if seen_ids.is_empty() {
+                            break;
+                        }
+                    }
+                    sleep(Duration::from_secs(2));
+                }
+
+                assert!(seen_ids.is_empty());
+            }
+        }
+
         wait_for_supermajority(config, &bank, &cluster_info);
 
         let voting_keypair = if config.voting_disabled {

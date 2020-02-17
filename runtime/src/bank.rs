@@ -1876,6 +1876,10 @@ impl Bank {
         }
     }
 
+    pub fn get_accounts_hash(&self) -> Hash {
+        self.rc.accounts.accounts_db.get_accounts_hash(self.slot)
+    }
+
     pub fn update_accounts_hash(&self) {
         self.rc
             .accounts

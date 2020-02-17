@@ -6,6 +6,7 @@ use log::*;
 use solana_measure::measure::Measure;
 use solana_metrics::inc_new_counter_info;
 use solana_runtime::{bank::Bank, status_cache::MAX_CACHE_ENTRIES};
+use solana_sdk::pubkey::Pubkey;
 use solana_sdk::{clock::Slot, timing};
 use std::{
     collections::{HashMap, HashSet},
@@ -26,6 +27,8 @@ pub struct SnapshotConfig {
 
     // Where to place the snapshots for recent slots
     pub snapshot_path: PathBuf,
+
+    pub trusted_validators: HashSet<Pubkey>,
 }
 
 #[derive(Error, Debug)]

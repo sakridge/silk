@@ -1054,6 +1054,7 @@ impl AccountsDB {
         ancestors: &HashMap<Slot, usize>,
     ) -> Result<Hash, BankHashVerificationError> {
         use BankHashVerificationError::*;
+        let mut scan = Measure::start("scan");
         let (mut hashes, mismatch_found) = self.scan_accounts(
             ancestors,
             |(collector, mismatch_found): &mut (Vec<(Pubkey, Hash)>, bool),
@@ -1067,20 +1068,32 @@ impl AccountsDB {
                         return;
                     }
                     debug!("xoring..{} key: {}", hash, pubkey);
-                    collector.push((*pubkey, hash));
+                    collector.push((*pubkey, account.hash));
                 }
             },
         );
+        scan.stop();
         if mismatch_found {
             return Err(MismatchedAccountHash);
         }
+        let mut sort = Measure::start("sort");
         hashes.par_sort_by(|a, b| a.0.cmp(&b.0));
+        sort.stop();
+        let mut hash = Measure::start("hash");
         let mut hasher = Hasher::default();
         for hash in &hashes {
             hasher.hash(hash.1.as_ref());
         }
+        hash.stop();
+        debug!("{} {} {}", scan, sort, hash);
 
         Ok(hasher.result())
+    }
+
+    pub fn get_accounts_hash(&self, slot: Slot) -> Hash {
+        let bank_hashes = self.bank_hashes.read().unwrap();
+        let bank_hash_info = bank_hashes.get(&slot).unwrap();
+        bank_hash_info.snapshot_hash
     }
 
     pub fn update_accounts_hash(&self, slot: Slot, ancestors: &HashMap<Slot, usize>) {

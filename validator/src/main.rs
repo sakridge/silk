@@ -31,6 +31,7 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, KeypairUtil},
 };
+use std::collections::HashSet;
 use std::{
     fs::{self, File},
     io::{self, Read},
@@ -587,6 +588,12 @@ pub fn main() {
                 .help("Skip ledger verification at node bootup"),
         )
         .arg(
+            clap::Arg::with_name("trusted_validators")
+                .long("trusted-validators")
+                .takes_value(true)
+                .help("Check that these validators have put the snapshot hash in gossip that is expected"),
+        )
+        .arg(
             clap::Arg::with_name("cuda")
                 .long("cuda")
                 .takes_value(false)
@@ -740,6 +747,21 @@ pub fn main() {
         exit(1);
     });
 
+    let trusted_validators =
+        if let Some(trusted_validators_str) = matches.value_of("trusted_validators") {
+            trusted_validators_str
+                .split(',')
+                .map(|x| {
+                    Pubkey::from_str(x).unwrap_or_else(|e| {
+                        eprintln!("Invalid pubkey in trusted validator set err: {}", e);
+                        exit(1);
+                    })
+                })
+                .collect()
+        } else {
+            HashSet::new()
+        };
+
     validator_config.snapshot_config = Some(SnapshotConfig {
         snapshot_interval_slots: if snapshot_interval_slots > 0 {
             snapshot_interval_slots
@@ -748,6 +770,7 @@ pub fn main() {
         },
         snapshot_path,
         snapshot_package_output_path: ledger_path.clone(),
+        trusted_validators,
     });
 
     if matches.is_present("limit_ledger_size") {
