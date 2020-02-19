@@ -1052,40 +1052,76 @@ impl AccountsDB {
     fn calculate_accounts_hash(
         &self,
         ancestors: &HashMap<Slot, usize>,
+        check_hash: bool,
     ) -> Result<Hash, BankHashVerificationError> {
         use BankHashVerificationError::*;
         let mut scan = Measure::start("scan");
-        let (mut hashes, mismatch_found) = self.scan_accounts(
+        /*let (mut hashes, mismatch_found) = self.scan_accounts(
             ancestors,
             |(collector, mismatch_found): &mut (Vec<(Pubkey, Hash)>, bool),
              option: Option<(&Pubkey, Account, Slot)>| {
                 if let Some((pubkey, account, slot)) = option {
-                    let hash = Self::hash_account(slot, &account, pubkey);
-                    if hash != account.hash {
-                        *mismatch_found = true;
+                    if check_hash {
+                        let hash = Self::hash_account(slot, &account, pubkey);
+                        if hash != account.hash {
+                            *mismatch_found = true;
+                        }
+                        if *mismatch_found {
+                            return;
+                        }
+                        debug!("xoring..{} key: {}", hash, pubkey);
                     }
-                    if *mismatch_found {
-                        return;
-                    }
-                    debug!("xoring..{} key: {}", hash, pubkey);
                     collector.push((*pubkey, account.hash));
                 }
             },
-        );
+        );*/
+        let accounts_index = self.accounts_index.read().unwrap();
+        let storage = self.storage.read().unwrap();
+        let keys: Vec<_> = accounts_index.account_maps.keys().collect();
+        let mut hashes: Vec<_> = keys
+            .par_iter()
+            .filter_map(|k| {
+                if let Some((list, index)) = accounts_index.get(k, ancestors) {
+                    let (slot, account_info) = &list[index];
+                    storage
+                        .0
+                        .get(&slot)
+                        .and_then(|storage_map| storage_map.get(&account_info.store_id))
+                        .and_then(|store| {
+                            let account = store.accounts.get_account(account_info.offset)?.0;
+                            Some((*k, *account.hash))
+                        })
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         scan.stop();
-        if mismatch_found {
+        /*if mismatch_found {
             return Err(MismatchedAccountHash);
-        }
+        }*/
         let mut sort = Measure::start("sort");
         hashes.par_sort_by(|a, b| a.0.cmp(&b.0));
         sort.stop();
-        let mut hash = Measure::start("hash");
+        let mut hash_time = Measure::start("hash");
+        let hashes: Vec<_> = hashes.chunks(16).collect();
+        let hashes: Vec<_> = hashes
+            .par_iter()
+            .map(|k| {
+                let mut hasher = Hasher::default();
+                for v in k.iter() {
+                    hasher.hash(v.1.as_ref());
+                }
+                hasher.result()
+            })
+            .collect();
         let mut hasher = Hasher::default();
         for hash in &hashes {
-            hasher.hash(hash.1.as_ref());
+            hasher.hash(hash.as_ref());
         }
-        hash.stop();
-        debug!("{} {} {}", scan, sort, hash);
+        hash_time.stop();
+        info!("{} {} {}", scan, sort, hash_time);
 
         Ok(hasher.result())
     }
@@ -1097,7 +1133,7 @@ impl AccountsDB {
     }
 
     pub fn update_accounts_hash(&self, slot: Slot, ancestors: &HashMap<Slot, usize>) {
-        let hash = self.calculate_accounts_hash(ancestors).unwrap();
+        let hash = self.calculate_accounts_hash(ancestors, false).unwrap();
         let mut bank_hashes = self.bank_hashes.write().unwrap();
         let mut bank_hash_info = bank_hashes.get_mut(&slot).unwrap();
         bank_hash_info.snapshot_hash = hash;
@@ -1110,7 +1146,7 @@ impl AccountsDB {
     ) -> Result<(), BankHashVerificationError> {
         use BankHashVerificationError::*;
 
-        let calculated_hash = self.calculate_accounts_hash(ancestors)?;
+        let calculated_hash = self.calculate_accounts_hash(ancestors, true)?;
 
         let bank_hashes = self.bank_hashes.read().unwrap();
         if let Some(found_hash_info) = bank_hashes.get(&slot) {

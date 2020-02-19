@@ -83,7 +83,7 @@ fn test_update_accounts_hash(bencher: &mut Bencher) {
     solana_logger::setup();
     let accounts = Accounts::new(vec![PathBuf::from("bench_accounts_hash_internal")]);
     let mut pubkeys: Vec<Pubkey> = vec![];
-    create_test_accounts(&accounts, &mut pubkeys, 50_000, 0);
+    create_test_accounts(&accounts, &mut pubkeys, 1_000_000, 0);
     let ancestors = vec![(0, 0)].into_iter().collect();
     bencher.iter(|| {
         accounts.accounts_db.update_accounts_hash(0, &ancestors);
