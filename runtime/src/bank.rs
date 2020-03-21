@@ -1857,7 +1857,7 @@ impl Bank {
             hash = extend_and_hash(&hash, &buf)
         }
 
-        info!(
+        debug!(
             "bank frozen: {} hash: {} accounts_delta: {} signature_count: {} last_blockhash: {}",
             self.slot(),
             hash,
@@ -1866,7 +1866,7 @@ impl Bank {
             self.last_blockhash(),
         );
 
-        info!(
+        debug!(
             "accounts hash slot: {} stats: {:?}",
             self.slot(),
             accounts_delta_hash.stats,

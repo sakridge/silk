@@ -177,14 +177,14 @@ impl Counter {
         let metricsrate = self.metricsrate.load(Ordering::Relaxed);
 
         if times % lograte == 0 && times > 0 && log_enabled!(level) {
-            log!(level,
+            /*log!(level,
                 "COUNTER:{{\"name\": \"{}\", \"counts\": {}, \"samples\": {},  \"now\": {}, \"events\": {}}}",
                 self.name,
                 counts + events,
                 times,
                 now,
                 events,
-            );
+            );*/
         }
 
         let lastlog = self.lastlog.load(Ordering::Relaxed);
@@ -192,13 +192,13 @@ impl Counter {
             .lastlog
             .compare_and_swap(lastlog, counts, Ordering::Relaxed);
         if prev == lastlog {
-            let bucket = now / metricsrate;
+            /*let bucket = now / metricsrate;
             let counter = CounterPoint {
                 name: self.name,
                 count: counts as i64 - lastlog as i64,
                 timestamp: now,
             };
-            submit_counter(counter, level, bucket);
+            submit_counter(counter, level, bucket);*/
         }
     }
 }

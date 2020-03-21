@@ -305,7 +305,7 @@ impl VoteState {
         if i != vote.slots.len() {
             warn!(
                 "{} dropped vote {:?} failed to match slot:  {:?}",
-                self.node_pubkey, vote, slot_hashes,
+                self.node_pubkey, vote, slot_hashes[0],
             );
             return Err(VoteError::SlotsMismatch);
         }

@@ -46,7 +46,7 @@ fn check_txs(
             break;
         }
         if poh_recorder.lock().unwrap().bank().is_none() {
-            trace!("no bank");
+            info!("no bank");
             no_bank = true;
             break;
         }
@@ -202,6 +202,7 @@ fn main() {
                 }
                 verified_sender.send(v.to_vec()).unwrap();
             }
+            info!("sent {} slot: {}", sent, bank.slot());
             let start_tx_index = config.get_transactions_index(start);
             let end_tx_index = config.get_transactions_index(start + chunk_len);
             for tx in &transactions[start_tx_index..end_tx_index] {
@@ -216,7 +217,7 @@ fn main() {
                 }
             }
             if check_txs(&signal_receiver, txes / CHUNKS, &poh_recorder) {
-                debug!(
+                info!(
                     "resetting bank {} tx count: {} txs_proc: {}",
                     bank.slot(),
                     bank.transaction_count(),
@@ -249,7 +250,7 @@ fn main() {
                     bank_forks.set_root(root, &None);
                     root += 1;
                 }
-                debug!(
+                info!(
                     "new_bank_time: {}us insert_time: {}us poh_time: {}us",
                     new_bank_time.as_us(),
                     insert_time.as_us(),

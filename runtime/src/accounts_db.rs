@@ -1280,7 +1280,7 @@ impl AccountsDB {
             .collect();
         let ret = Self::accumulate_account_hashes(hashes);
         accumulate.stop();
-        info!("{} {} {}", scan, merge, accumulate);
+        debug!("{} {} {}", scan, merge, accumulate);
         ret
     }
 
