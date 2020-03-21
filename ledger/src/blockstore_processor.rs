@@ -450,15 +450,15 @@ fn confirm_full_slot(
     last_entry_hash: &Hash,
     opts: &ProcessOptions,
     recyclers: &VerifyRecyclers,
+    progress: &mut ConfirmationProgress,
 ) -> result::Result<(), BlockstoreProcessorError> {
     let mut timing = ConfirmationTiming::default();
-    let mut progress = ConfirmationProgress::new(*last_entry_hash);
     let skip_verification = !opts.poh_verify;
     confirm_slot(
         blockstore,
         bank,
         &mut timing,
-        &mut progress,
+        progress,
         skip_verification,
         None,
         opts.entry_callback.as_ref(),
@@ -619,7 +619,8 @@ fn process_bank_0(
     recyclers: &VerifyRecyclers,
 ) -> result::Result<(), BlockstoreProcessorError> {
     assert_eq!(bank0.slot(), 0);
-    confirm_full_slot(blockstore, bank0, &bank0.last_blockhash(), opts, recyclers)
+    let mut progress = ConfirmationProgress::new(bank0.last_blockhash());
+    confirm_full_slot(blockstore, bank0, &bank0.last_blockhash(), opts, recyclers, &mut progress)
         .expect("processing for bank 0 must succceed");
     bank0.freeze();
     Ok(())
@@ -634,6 +635,7 @@ fn process_next_slots(
     leader_schedule_cache: &LeaderScheduleCache,
     pending_slots: &mut Vec<(SlotMeta, Arc<Bank>, Hash)>,
     fork_info: &mut HashMap<u64, (Arc<Bank>, BankForksInfo)>,
+    slot_count: &mut usize,
 ) -> result::Result<(), BlockstoreProcessorError> {
     if let Some(parent) = bank.parent() {
         fork_info.remove(&parent.slot());
@@ -676,6 +678,7 @@ fn process_next_slots(
                 bank.slot(),
                 allocated.since(initial_allocation)
             );
+            *slot_count += 1;
             pending_slots.push((next_meta, next_bank, bank.last_blockhash()));
         }
     }
@@ -700,6 +703,8 @@ fn process_pending_slots(
     let mut last_status_report = Instant::now();
     let mut pending_slots = vec![];
     let mut last_root_slot = root_bank.slot();
+    let mut last_slot_count = 0;
+    let mut txs = 0;
     process_next_slots(
         root_bank,
         root_meta,
@@ -707,6 +712,7 @@ fn process_pending_slots(
         leader_schedule_cache,
         &mut pending_slots,
         &mut fork_info,
+        &mut last_slot_count,
     )?;
 
     let dev_halt_at_slot = opts.dev_halt_at_slot.unwrap_or(std::u64::MAX);
@@ -714,19 +720,24 @@ fn process_pending_slots(
         let (meta, bank, last_entry_hash) = pending_slots.pop().unwrap();
         let slot = bank.slot();
         if last_status_report.elapsed() > Duration::from_secs(2) {
+            let secs = last_status_report.elapsed().as_secs() as f32;
             info!(
-                "processing ledger: slot={}, last root slot={}",
-                slot, last_root_slot
+                "processing ledger: slot={}, last root slot={} slots={} slots/s={:?} txs/s={}",
+                slot, last_root_slot, last_slot_count, last_slot_count as f32 / secs, txs as f32 / secs,
             );
             last_status_report = Instant::now();
+            last_slot_count = 0;
+            txs = 0;
         }
 
         let allocated = thread_mem_usage::Allocatedp::default();
         let initial_allocation = allocated.get();
 
-        if process_single_slot(blockstore, &bank, &last_entry_hash, opts, recyclers).is_err() {
+        let mut progress = ConfirmationProgress::new(last_entry_hash);
+        if process_single_slot(blockstore, &bank, &last_entry_hash, opts, recyclers, &mut progress).is_err() {
             continue;
         }
+        txs += progress.num_txs;
 
         if blockstore.is_root(slot) {
             let parents = bank.parents().into_iter().map(|b| b.slot()).rev().skip(1);
@@ -739,6 +750,7 @@ fn process_pending_slots(
             fork_info.clear();
             last_root_slot = slot;
         }
+        last_slot_count += 1;
 
         trace!(
             "Bank for {}slot {} is complete. {} bytes allocated",
@@ -754,6 +766,7 @@ fn process_pending_slots(
             leader_schedule_cache,
             &mut pending_slots,
             &mut fork_info,
+            &mut last_slot_count,
         )?;
 
         if slot >= dev_halt_at_slot {
@@ -772,10 +785,11 @@ fn process_single_slot(
     last_entry_hash: &Hash,
     opts: &ProcessOptions,
     recyclers: &VerifyRecyclers,
+    progress: &mut ConfirmationProgress,
 ) -> result::Result<(), BlockstoreProcessorError> {
     // Mark corrupt slots as dead so validators don't replay this slot and
     // see DuplicateSignature errors later in ReplayStage
-    confirm_full_slot(blockstore, bank, last_entry_hash, opts, recyclers).map_err(|err| {
+    confirm_full_slot(blockstore, bank, last_entry_hash, opts, recyclers, progress).map_err(|err| {
         let slot = bank.slot();
         blockstore
             .set_dead_slot(slot)
