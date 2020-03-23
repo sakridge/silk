@@ -1597,7 +1597,7 @@ impl Blockstore {
         let entries: Result<Vec<Vec<Entry>>> = PAR_THREAD_POOL.with(|thread_pool| {
             thread_pool.borrow().install(|| {
                 completed_ranges
-                    .par_iter()
+                    .iter()
                     .map(|(start_index, end_index)| {
                         self.get_entries_in_data_block(slot, *start_index, *end_index, &slot_meta)
                     })
@@ -1650,7 +1650,7 @@ impl Blockstore {
                 data_shred_cf
                     .get_bytes((slot, u64::from(i)))
                     .and_then(|serialized_shred| {
-                        Shred::new_from_serialized_shred(serialized_shred.unwrap_or_else(|| {
+                        let shred = serialized_shred.unwrap_or_else(|| {
                             panic!(
                                 "Shred with
                         slot: {},
@@ -1665,15 +1665,17 @@ impl Blockstore {
                                 start_index,
                                 end_index
                             )
-                        }))
-                        .map_err(|err| {
+                        });
+                        let len = shred.len();
+                        let res = Shred::new_from_serialized_shred(shred).map_err(|err| {
                             BlockstoreError::InvalidShredData(Box::new(bincode::ErrorKind::Custom(
                                 format!(
                                     "Could not reconstruct shred from shred payload: {:?}",
                                     err
                                 ),
                             )))
-                        })
+                        });
+                        res
                     })
             })
             .collect();
