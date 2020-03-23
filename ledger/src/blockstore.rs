@@ -94,6 +94,7 @@ pub struct Blockstore {
     pub completed_slots_senders: Vec<SyncSender<Vec<Slot>>>,
     pub lowest_cleanup_slot: Arc<RwLock<u64>>,
     no_compaction: bool,
+    id: u64,
 }
 
 pub struct IndexMetaWorkingSetEntry {
@@ -172,6 +173,7 @@ impl Blockstore {
 
     /// Opens a Ledger in directory, provides "infinite" window of shreds
     pub fn open(ledger_path: &Path) -> Result<Blockstore> {
+        use rand::{Rng, thread_rng};
         fs::create_dir_all(&ledger_path)?;
         let blockstore_path = ledger_path.join(BLOCKSTORE_DIRECTORY);
 
@@ -230,6 +232,7 @@ impl Blockstore {
             last_root,
             lowest_cleanup_slot: Arc::new(RwLock::new(0)),
             no_compaction: false,
+            id: thread_rng().gen_range(0, 100),
         };
         Ok(blockstore)
     }
@@ -649,6 +652,8 @@ impl Blockstore {
         let mut num_inserted = 0;
         let mut index_meta_time = 0;
         let shreds_len = shreds.len();
+        let shred_slots: Vec<_> = shreds.iter().map(|s| (s.slot(), s.index(), s.is_data())).collect();
+        info!("{} insert shreds: {:?}", self.id, shred_slots);
         shreds.into_iter().for_each(|shred| {
             if shred.is_data() {
                 if self.check_insert_data_shred(

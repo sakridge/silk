@@ -61,7 +61,7 @@ fn verify_shred_cpu(packet: &Packet, slot_leaders: &HashMap<u64, [u8; 32]>) -> O
         return Some(0);
     }
     let signature = Signature::new(&packet.data[sig_start..sig_end]);
-    trace!("signature {}", signature);
+    info!("verify: signature {} len {}", signature, msg_end - msg_start);
     if !signature.verify(pubkey, &packet.data[msg_start..msg_end]) {
         return Some(0);
     }
@@ -72,17 +72,25 @@ fn verify_shreds_cpu(batches: &[Packets], slot_leaders: &HashMap<u64, [u8; 32]>)
     use rayon::prelude::*;
     let count = batch_size(batches);
     debug!("CPU SHRED ECDSA for {}", count);
+    let mut verified = 0;
     let rv = SIGVERIFY_THREAD_POOL.install(|| {
         batches
-            .into_par_iter()
+            .into_iter()
             .map(|p| {
                 p.packets
-                    .par_iter()
-                    .map(|p| verify_shred_cpu(p, slot_leaders).unwrap_or(0))
+                    .iter()
+                    .map(|p| {
+                        let res = verify_shred_cpu(p, slot_leaders).unwrap_or(0);
+                        if res != 0 {
+                            verified += 1;
+                        }
+                        res
+                    })
                     .collect()
             })
             .collect()
     });
+    info!("sigverify_shreds: {} verified: {}", count, verified);
     inc_new_counter_debug!("ed25519_shred_verify_cpu", count);
     rv
 }
@@ -302,7 +310,7 @@ fn sign_shred_cpu(keypair: &Keypair, packet: &mut Packet) {
         "packet is not large enough for a signature"
     );
     let signature = keypair.sign_message(&packet.data[msg_start..msg_end]);
-    trace!("signature {:?}", signature);
+    info!("sign shred: signature {:?} len {}", signature, msg_end - msg_start);
     packet.data[0..sig_end].copy_from_slice(&signature.as_ref());
 }
 
