@@ -648,6 +648,7 @@ impl Blockstore {
         let mut start = Measure::start("Shred insertion");
         let mut num_inserted = 0;
         let mut index_meta_time = 0;
+        let shreds_len = shreds.len();
         shreds.into_iter().for_each(|shred| {
             if shred.is_data() {
                 if self.check_insert_data_shred(
@@ -724,6 +725,7 @@ impl Blockstore {
                 num_inserted += 1;
             });
 
+        info!("insert_shreds: {} inserted: {}", shreds_len, num_inserted);
         let mut start = Measure::start("Shred recovery");
         // Handle chaining for the members of the slot_meta_working_set that were inserted into,
         // drop the others
