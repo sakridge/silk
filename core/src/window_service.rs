@@ -155,15 +155,19 @@ where
     inc_new_counter_debug!("streamer-recv_window-recv", total_packets);
 
     let last_root = blockstore.last_root();
+    let mut filtered = 0;
+    let mut already_discard = 0;
+    let mut deserialize = 0;
     let shreds: Vec<_> = thread_pool.install(|| {
         packets
-            .par_iter_mut()
+            .iter_mut()
             .flat_map(|packets| {
                 packets
                     .packets
                     .iter_mut()
                     .filter_map(|packet| {
                         if packet.meta.discard {
+                            already_discard += 1;
                             inc_new_counter_debug!("streamer-recv_window-invalid_signature", 1);
                             None
                         } else if let Ok(shred) =
@@ -181,10 +185,12 @@ where
                                 packet.meta.seed = shred.seed();
                                 Some(shred)
                             } else {
+                                filtered += 1;
                                 packet.meta.discard = true;
                                 None
                             }
                         } else {
+                            deserialize += 1;
                             packet.meta.discard = true;
                             None
                         }
@@ -194,9 +200,8 @@ where
             .collect()
     });
 
-    trace!("{:?} shreds from packets", shreds.len());
-
-    trace!("{} num total shreds received: {}", my_pubkey, total_packets);
+    info!("{} num total shreds received: {} passed: {} disc: {} deser: {} filter: {}",
+        my_pubkey, total_packets, shreds.len(), already_discard, deserialize, filtered);
 
     for packets in packets.into_iter() {
         if !packets.is_empty() {

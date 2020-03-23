@@ -209,8 +209,14 @@ impl StandardBroadcastRun {
         let stakes = stakes.map(Arc::new);
         let data_shreds = Arc::new(data_shreds);
         socket_sender.send((stakes.clone(), data_shreds.clone()))?;
+        for shred in data_shreds.iter() {
+            info!("sending data shred: {} {}", shred.slot(), shred.index());
+        }
         blockstore_sender.send(data_shreds.clone())?;
         let coding_shreds = shredder.data_shreds_to_coding_shreds(&data_shreds[0..last_data_shred]);
+        for shred in coding_shreds.iter() {
+            info!("sending coding shred: {} {}", shred.slot(), shred.index());
+        }
         let coding_shreds = Arc::new(coding_shreds);
         socket_sender.send((stakes, coding_shreds.clone()))?;
         blockstore_sender.send(coding_shreds)?;

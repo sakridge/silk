@@ -124,6 +124,7 @@ impl ServeRepair {
         let (res, label) = {
             match &request {
                 RepairProtocol::WindowIndex(from, slot, shred_index) => {
+                    info!("window_index: {} {} {}", from.id, slot, shred_index);
                     inc_new_counter_debug!("serve_repair-request-window-index", 1);
                     (
                         Self::run_window_request(
@@ -139,7 +140,8 @@ impl ServeRepair {
                     )
                 }
 
-                RepairProtocol::HighestWindowIndex(_, slot, highest_index) => {
+                RepairProtocol::HighestWindowIndex(from, slot, highest_index) => {
+                    info!("highest_window_index: {} {} {}", from.id, slot, highest_index);
                     inc_new_counter_debug!("serve_repair-request-highest-window-index", 1);
                     (
                         Self::run_highest_window_request(
@@ -152,7 +154,8 @@ impl ServeRepair {
                         "HighestWindowIndex",
                     )
                 }
-                RepairProtocol::Orphan(_, slot) => {
+                RepairProtocol::Orphan(from, slot) => {
+                    info!("oprhan: {} {}", from.id, slot);
                     inc_new_counter_debug!("serve_repair-request-orphan", 1);
                     (
                         Self::run_orphan(

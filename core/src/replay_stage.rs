@@ -584,8 +584,8 @@ impl ReplayStage {
 
             let root_slot = bank_forks.read().unwrap().root();
             info!(
-                "new fork:{} parent:{} (leader) root:{}",
-                poh_slot, parent_slot, root_slot
+                "{} new fork:{} parent:{} (leader) root:{}",
+                my_pubkey, poh_slot, parent_slot, root_slot
             );
 
             let tpu_bank = Self::new_bank_from_parent_with_notify(

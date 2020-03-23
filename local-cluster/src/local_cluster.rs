@@ -285,6 +285,10 @@ impl LocalCluster {
         )
         .unwrap();
 
+        for validator in cluster.validators.keys() {
+            info!("validator: {}", validator);
+        }
+
         cluster
     }
 

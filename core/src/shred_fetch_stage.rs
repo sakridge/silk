@@ -51,6 +51,8 @@ impl ShredFetchStage {
         p: &mut Packet,
         shreds_received: &mut ShredsReceived,
         index_overrun: &mut usize,
+        slot_filter: &mut usize,
+        dupe: &mut usize,
         last_root: Slot,
         last_slot: Slot,
         slots_per_epoch: u64,
@@ -70,7 +72,17 @@ impl ShredFetchStage {
                     p.meta.discard = false;
                     modify(p);
                     slot_received.set(index.into(), true);
+                } else {
+                    *dupe += 1;
                 }
+            } else {
+                use solana_ledger::shred::Shred;
+                info!("filtered: {} index: {} root: {} per_epoch: {}", slot, index, last_root, slots_per_epoch);
+                //info!("shred: {:?}", p);
+                //info!("shred.data: {:?}", p.data.to_vec());
+                let shred = Shred::new_from_serialized_shred(p.data.to_vec());
+                info!("shred: {:?}", shred);
+                *slot_filter += 1;
             }
         }
     }
@@ -107,18 +119,24 @@ impl ShredFetchStage {
             }
             let mut index_overrun = 0;
             let mut shred_count = 0;
+            let mut slot_filter = 0;
+            let mut dupe = 0;
             p.packets.iter_mut().for_each(|mut packet| {
                 shred_count += 1;
                 Self::process_packet(
                     &mut packet,
                     &mut shreds_received,
                     &mut index_overrun,
+                    &mut slot_filter,
+                    &mut dupe,
                     last_root,
                     last_slot,
                     slots_per_epoch,
                     &modify,
                 );
             });
+            info!("index_overrun: {} count: {} slot_filter: {} dupe: {}",
+                index_overrun, shred_count, slot_filter, dupe);
             inc_new_counter_warn!("shred_fetch_stage-shred_index_overrun", index_overrun);
             inc_new_counter_info!("shred_fetch_stage-shred_count", shred_count);
             if sendr.send(p).is_err() {
