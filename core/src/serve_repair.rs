@@ -131,7 +131,7 @@ impl ServeRepair {
                 RepairProtocol::WindowIndex(from, slot, shred_index) => {
                     stats.window_index += 1;
                     (
-                        Self::run_window_request(
+                        /*Self::run_window_request(
                             recycler,
                             from,
                             &from_addr,
@@ -139,7 +139,8 @@ impl ServeRepair {
                             &me.read().unwrap().my_info,
                             *slot,
                             *shred_index,
-                        ),
+                        )*/
+                        None,
                         "WindowIndex",
                     )
                 }
@@ -147,26 +148,28 @@ impl ServeRepair {
                 RepairProtocol::HighestWindowIndex(_, slot, highest_index) => {
                     stats.highest_window_index += 1;
                     (
-                        Self::run_highest_window_request(
+                        /*Self::run_highest_window_request(
                             recycler,
                             &from_addr,
                             blockstore,
                             *slot,
                             *highest_index,
-                        ),
+                        )*/
+                        None,
                         "HighestWindowIndex",
                     )
                 }
                 RepairProtocol::Orphan(_, slot) => {
                     stats.orphan += 1;
                     (
-                        Self::run_orphan(
+                        /*Self::run_orphan(
                             recycler,
                             &from_addr,
                             blockstore,
                             *slot,
                             MAX_ORPHAN_REPAIR_RESPONSES,
-                        ),
+                        )*/
+                        None,
                         "Orphan",
                     )
                 }
