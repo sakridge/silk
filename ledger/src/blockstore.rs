@@ -137,7 +137,7 @@ impl SlotMetaWorkingSetEntry {
 
 impl BlockstoreInsertionMetrics {
     pub fn report_metrics(&self, metric_name: &'static str) {
-        datapoint_info!(
+        datapoint_debug!(
             metric_name,
             ("num_shreds", self.num_shreds as i64, i64),
             ("total_elapsed", self.total_elapsed as i64, i64),
@@ -279,6 +279,7 @@ impl Blockstore {
         // if there's no upper bound, split the purge request into batches of 1000 slots
         const PURGE_BATCH_SIZE: u64 = 1000;
         let mut batch_end = to_slot.unwrap_or(from_slot + PURGE_BATCH_SIZE);
+        let mut time = Measure::start("purge");
         while from_slot < batch_end {
             match self.run_purge(from_slot, batch_end) {
                 Ok(end) => {
@@ -290,6 +291,7 @@ impl Blockstore {
                                 e, from_slot, batch_end
                             );
                         }
+                    } else {
                     }
 
                     if end {
@@ -309,6 +311,8 @@ impl Blockstore {
                 }
             }
         }
+        time.stop();
+        info!("purge_slots: {} -> {:?} took: {}", from_slot, to_slot, time);
     }
 
     // Returns whether or not all columns have been purged until their end
