@@ -1229,7 +1229,7 @@ impl ClusterInfo {
                 loop {
                     let start = timestamp();
                     thread_mem_usage::datapoint("solana-gossip");
-                    if start - last_contact_info_trace > 10000 {
+                    if start - last_contact_info_trace > 1_200_000 {
                         // Log contact info every 10 seconds
                         info!("\n{}", obj.read().unwrap().contact_info_trace());
                         last_contact_info_trace = start;
