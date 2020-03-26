@@ -170,6 +170,9 @@ impl Counter {
             .compare_and_swap(0, Self::default_metrics_rate(), Ordering::Relaxed);
     }
     pub fn inc(&mut self, level: log::Level, events: usize) {
+        if events == 0 {
+            return;
+        }
         let now = timing::timestamp();
         let counts = self.counts.fetch_add(events, Ordering::Relaxed);
         let times = self.times.fetch_add(1, Ordering::Relaxed);
