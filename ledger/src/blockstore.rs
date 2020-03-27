@@ -276,7 +276,7 @@ impl Blockstore {
     /// Dangerous; Use with care:
     /// Does not check for integrity and does not update slot metas that refer to deleted slots
     /// Modifies multiple column families simultaneously
-    pub fn purge_slots(&self, mut from_slot: Slot, to_slot: Option<Slot>) {
+    pub fn purge_slots(&self, mut from_slot: Slot, to_slot: Option<Slot>, compact: bool) {
         // if there's no upper bound, split the purge request into batches of 1000 slots
         const PURGE_BATCH_SIZE: u64 = 1000;
         let mut batch_end = to_slot.unwrap_or(from_slot + PURGE_BATCH_SIZE);
@@ -284,7 +284,7 @@ impl Blockstore {
         while from_slot < batch_end {
             match self.run_purge(from_slot, batch_end) {
                 Ok(end) => {
-                    if !self.no_compaction {
+                    if compact {
                         if let Err(e) = self.compact_storage(from_slot, batch_end) {
                             // This error is not fatal and indicates an internal error
                             error!(
@@ -1813,7 +1813,7 @@ impl Blockstore {
         )
         .expect("unable to update meta for target slot");
 
-        self.purge_slots(target_slot + 1, None);
+        self.purge_slots(target_slot + 1, None, true);
 
         // fixup anything that refers to non-root slots and delete the rest
         for (slot, mut meta) in self

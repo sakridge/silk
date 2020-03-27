@@ -567,6 +567,7 @@ impl Database {
     }
 
     pub fn storage_size(&self) -> Result<u64> {
+        info!("storage size: {:?}", self.backend.0.property_value("rocksdb.total-sst-files-size"));
         Ok(fs_extra::dir::get_size(&self.path)?)
     }
 

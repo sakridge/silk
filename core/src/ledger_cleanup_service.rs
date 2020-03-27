@@ -9,7 +9,8 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::Arc;
 use std::thread;
 use std::thread::{Builder, JoinHandle};
-use std::time::Duration;
+use std::time::{Instant, Duration};
+use solana_measure::measure::Measure;
 
 // This is chosen to allow enough time for
 // - To try and keep the RocksDB size under 512GB at 50k tps (100 slots take ~2GB).
@@ -18,7 +19,7 @@ use std::time::Duration;
 //   to catch back up to where it was when it stopped
 pub const DEFAULT_MAX_LEDGER_SLOTS: u64 = 270_000;
 // Remove a fixed number of slots at a time, it's more efficient than doing it one-by-one
-pub const DEFAULT_PURGE_BATCH_SIZE: u64 = 256;
+pub const DEFAULT_PURGE_BATCH_SIZE: u64 = 512;
 
 pub struct LedgerCleanupService {
     t_cleanup: JoinHandle<()>,
@@ -36,7 +37,7 @@ impl LedgerCleanupService {
             max_ledger_slots
         );
         let exit = exit.clone();
-        let mut next_purge_batch = max_ledger_slots;
+        let mut roots_since_purge = 0;
         let t_cleanup = Builder::new()
             .name("solana-ledger-cleanup".to_string())
             .spawn(move || loop {
@@ -47,7 +48,9 @@ impl LedgerCleanupService {
                     &new_root_receiver,
                     &blockstore,
                     max_ledger_slots,
-                    &mut next_purge_batch,
+                    &mut roots_since_purge,
+                    DEFAULT_PURGE_BATCH_SIZE,
+                    no_rocksdb_compaction,
                 ) {
                     match e {
                         RecvTimeoutError::Disconnected => break,
@@ -62,37 +65,81 @@ impl LedgerCleanupService {
     fn cleanup_ledger(
         new_root_receiver: &Receiver<Slot>,
         blockstore: &Arc<Blockstore>,
-        max_ledger_slots: u64,
-        next_purge_batch: &mut u64,
+        max_ledger_utilization: u64,
+        roots_since_purge: &mut u64,
+        purge_batch_size: u64,
+        no_rocksdb_compaction,
     ) -> Result<(), RecvTimeoutError> {
-        let disk_utilization_pre = blockstore.storage_size();
-
-        let root = new_root_receiver.recv_timeout(Duration::from_secs(1))?;
-
-        // Notify blockstore of impending purge
-        if root > *next_purge_batch {
-            //cleanup
-            let lowest_slot = root - max_ledger_slots;
-            *blockstore.lowest_cleanup_slot.write().unwrap() = lowest_slot;
-            blockstore.purge_slots(0, Some(lowest_slot));
-            *next_purge_batch += DEFAULT_PURGE_BATCH_SIZE;
+        let mut root = new_root_receiver.recv_timeout(Duration::from_secs(1))?;
+        *roots_since_purge += 1;
+        // Get the newest root
+        while let Ok(new_root) = new_root_receiver.try_recv() {
+            root = new_root;
+            *roots_since_purge += 1;
         }
 
-        let disk_utilization_post = blockstore.storage_size();
+        if *roots_since_purge > purge_batch_size {
+            let disk_utilization_pre = blockstore.storage_size();
 
-        if let (Ok(disk_utilization_pre), Ok(disk_utilization_post)) =
-            (disk_utilization_pre, disk_utilization_post)
-        {
-            datapoint_debug!(
-                "ledger_disk_utilization",
-                ("disk_utilization_pre", disk_utilization_pre as i64, i64),
-                ("disk_utilization_post", disk_utilization_post as i64, i64),
-                (
-                    "disk_utilization_delta",
-                    (disk_utilization_pre as i64 - disk_utilization_post as i64),
-                    i64
-                )
-            );
+            // Notify blockstore of impending purge
+            //cleanup
+            let mut num_root_slots = 0;
+            let mut root_shreds = Vec::new();
+            let mut iterate_time = Measure::start("iterate_time");
+            let mut non_root_purged = 0;
+            for (slot, meta) in blockstore.slot_meta_iterator(0).unwrap() {
+                if blockstore.is_dead(slot) {
+                    non_root_purged += 1;
+                    blockstore.purge_slots(slot, Some(slot + 1), false);
+                } else if !blockstore.is_root(slot) {
+                    non_root_purged += 1;
+                    blockstore.purge_slots(slot, Some(slot + 1), false);
+                } else if !blockstore.is_full(slot) {
+                    non_root_purged += 1;
+                    blockstore.purge_slots(slot, Some(slot + 1), false);
+                } else if blockstore.is_root(slot) {
+                    root_shreds.push((slot, meta.completed_data_indexes.len()));
+                }
+                if slot > root {
+                    break;
+                }
+            }
+            info!("checking for ledger purge: {:?} max: {} slots: {} non_root_purged: {}",
+                disk_utilization_pre, max_ledger_utilization, root_shreds.len(), non_root_purged);
+            iterate_time.stop();
+            let mut total_shreds = 0;
+            let mut lowest_slot_to_clean = root_shreds[0].0;
+            for (slot, num_shreds) in root_shreds.reverse() {
+                if total_shreds > max_ledger_utilization {
+                    lowest_slot_to_clean = slot;
+                    break;
+                }
+            }
+            let mut slot_update_time = Measure::start("slot_update");
+            *blockstore.lowest_cleanup_slot.write().unwrap() = lowest_slot_to_clean;
+            slot_update_time.stop();
+            let mut clean_time = Measure::start("ledger_clean");
+            blockstore.purge_slots(0, Some(lowest_slot_to_clean), !no_rocksdb_compaction);
+            clean_time.stop();
+
+            debug!("ledger purge: {} {} {}", iterate_time, slot_update, clean_time);
+
+            let disk_utilization_post = blockstore.storage_size();
+
+            if let (Ok(disk_utilization_pre), Ok(disk_utilization_post)) =
+                (disk_utilization_pre, disk_utilization_post)
+            {
+                datapoint_debug!(
+                    "ledger_disk_utilization",
+                    ("disk_utilization_pre", disk_utilization_pre as i64, i64),
+                    ("disk_utilization_post", disk_utilization_post as i64, i64),
+                    (
+                        "disk_utilization_delta",
+                        (disk_utilization_pre as i64 - disk_utilization_post as i64),
+                        i64
+                    )
+                );
+            }
         }
 
         Ok(())

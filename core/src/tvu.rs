@@ -214,6 +214,7 @@ impl Tvu {
                 blockstore.clone(),
                 max_ledger_slots,
                 &exit,
+                no_rocksdb_compaction,
             )
         });
 
