@@ -117,7 +117,7 @@ impl<T: Default + Reset> RecyclerX<T> {
                 .overcapacity_count
                 .fetch_add(1, Ordering::Relaxed);
             if count > 1000 {
-                info!("Shrinking: {} len: {} capacity: {}", len, capacity);
+                info!("Shrinking: {} len: {} capacity: {}", self.id, len, capacity);
                 self.gc.lock().expect("recycler lock").shrink_to_fit();
                 self.stats.overcapacity_count.store(0, Ordering::Relaxed);
             }
