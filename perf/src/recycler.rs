@@ -89,7 +89,7 @@ impl<T: Default + Reset + Sized> Recycler<T> {
         }
 
         let total = self.recycler.stats.total.fetch_add(1, Ordering::Relaxed);
-        trace!(
+        info!(
             "allocating new: total {} {:?} id: {} reuse: {} max_gc: {}",
             total,
             name,
@@ -117,6 +117,7 @@ impl<T: Default + Reset> RecyclerX<T> {
                 .overcapacity_count
                 .fetch_add(1, Ordering::Relaxed);
             if count > 1000 {
+                info!("Shrinking: {} len: {} capacity: {}", len, capacity);
                 self.gc.lock().expect("recycler lock").shrink_to_fit();
                 self.stats.overcapacity_count.store(0, Ordering::Relaxed);
             }
