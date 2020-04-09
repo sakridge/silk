@@ -2,6 +2,7 @@ use clap::{
     crate_description, crate_name, value_t, value_t_or_exit, values_t_or_exit, App, Arg,
     ArgMatches, SubCommand,
 };
+use std::thread::sleep;
 use std::time::Duration;
 use solana_core::cluster_info::Node;
 use crossbeam_channel::unbounded;
@@ -649,7 +650,7 @@ fn load_bank_forks(
         process_options,
     ).unwrap();
 
-    let slot = 4187144;
+    /*let slot = 4187144;
     let parent = slot - 1;
     let parent_bank = res.0.get(parent).unwrap();
 
@@ -684,6 +685,7 @@ fn load_bank_forks(
         if !entry.transactions.is_empty() {
             total_txs_ref += entry.transactions.len();
             verified_sender.send(to_packets_chunked(&entry.transactions, 10));
+            sleep(Duration::from_millis(1));
         }
     }
     let mut total = 0;
@@ -691,14 +693,15 @@ fn load_bank_forks(
         if let Ok((_bank, (entry, _tick_height))) = signal_receiver.recv_timeout(Duration::from_millis(10)) {
             total += entry.transactions.len();
         }
-        if total >= total_txs_ref {
+        /*if total >= total_txs_ref {
             break;
-        }
+        }*/
         if poh_recorder.lock().unwrap().bank().is_none() {
             println!("no bank");
             break;
         }
     }
+    bank.squash();*/
 
     Ok(res)
 }
