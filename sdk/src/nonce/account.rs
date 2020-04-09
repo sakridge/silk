@@ -8,6 +8,7 @@ use crate::{
     system_program,
     sysvar::{recent_blockhashes::RecentBlockhashes, rent::Rent},
 };
+use log::*;
 use std::{cell::RefCell, collections::HashSet};
 
 pub trait Account {
@@ -43,6 +44,7 @@ impl<'a> Account for KeyedAccount<'a> {
         recent_blockhashes: &RecentBlockhashes,
         signers: &HashSet<Pubkey>,
     ) -> Result<(), InstructionError> {
+        info!("advance_nonce_account recent_blockhashes: {}", recent_blockhashes.len());
         if recent_blockhashes.is_empty() {
             return Err(NonceError::NoRecentBlockhashes.into());
         }
@@ -50,11 +52,14 @@ impl<'a> Account for KeyedAccount<'a> {
         let state = AccountUtilsState::<Versions>::state(self)?.convert_to_current();
         match state {
             State::Initialized(data) => {
+                info!("nonce: state initialized");
                 if !signers.contains(&data.authority) {
                     return Err(InstructionError::MissingRequiredSignature);
                 }
                 let recent_blockhash = recent_blockhashes[0].blockhash;
                 if data.blockhash == recent_blockhash {
+                    info!("advance_nonce_account: block hash != recent_blockhash: {} {}",
+                          data.blockhash, recent_blockhash);
                     return Err(NonceError::NotExpired.into());
                 }
 
@@ -63,7 +68,9 @@ impl<'a> Account for KeyedAccount<'a> {
                     fee_calculator: recent_blockhashes[0].fee_calculator.clone(),
                     ..data
                 };
-                self.set_state(&Versions::new_current(State::Initialized(new_data)))
+                let ret = self.set_state(&Versions::new_current(State::Initialized(new_data)));
+                info!("nonce: set_state done {}", ret.is_err());
+                ret
             }
             _ => Err(NonceError::BadAccountState.into()),
         }
@@ -87,6 +94,8 @@ impl<'a> Account for KeyedAccount<'a> {
             State::Initialized(ref data) => {
                 if lamports == self.lamports()? {
                     if data.blockhash == recent_blockhashes[0].blockhash {
+                        info!("withdraw_nonce_account: block hash == recent_blockhash: {} {}",
+                              data.blockhash, recent_blockhashes[0].blockhash);
                         return Err(NonceError::NotExpired.into());
                     }
                 } else {

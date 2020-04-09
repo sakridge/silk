@@ -533,6 +533,11 @@ impl ReplayStage {
                 poh_slot, parent_slot, root_slot
             );
             subscriptions.notify_slot(poh_slot, parent_slot, root_slot);
+            if poh_slot > 4187145 {
+                use std::process::exit;
+                info!("reached..");
+                exit(0);
+            }
             let tpu_bank = bank_forks
                 .write()
                 .unwrap()
@@ -1039,6 +1044,12 @@ impl ReplayStage {
                     forks.root()
                 );
                 subscriptions.notify_slot(child_slot, parent_slot, forks.root());
+
+                if child_slot > 4187145 {
+                    use std::process::exit;
+                    info!("reached..");
+                    exit(0);
+                }
 
                 let child_bank = Bank::new_from_parent(&parent_bank, &leader, child_slot);
                 Self::record_rewards(&child_bank, &rewards_recorder_sender);

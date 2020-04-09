@@ -2,6 +2,13 @@ use clap::{
     crate_description, crate_name, value_t, value_t_or_exit, values_t_or_exit, App, Arg,
     ArgMatches, SubCommand,
 };
+use std::time::Duration;
+use solana_core::cluster_info::Node;
+use crossbeam_channel::unbounded;
+use solana_core::packet::to_packets_chunked;
+use solana_core::banking_stage::{BankingStage, create_test_recorder};
+use solana_runtime::bank::Bank;
+use std::sync::{Arc, RwLock};
 use histogram;
 use serde_json::json;
 use solana_clap_utils::input_validators::is_slot;
@@ -14,6 +21,7 @@ use solana_ledger::{
     rooted_slot_iterator::RootedSlotIterator,
     snapshot_utils,
 };
+use solana_core::cluster_info::ClusterInfo;
 use solana_sdk::{
     clock::Slot, genesis_config::GenesisConfig, native_token::lamports_to_sol,
     program_utils::limited_deserialize, pubkey::Pubkey, shred_version::compute_shred_version,
@@ -632,13 +640,67 @@ fn load_bank_forks(
         vec![ledger_path.join("accounts")]
     };
 
-    bank_forks_utils::load(
+    let blockstore = open_blockstore(&ledger_path);
+    let res = bank_forks_utils::load(
         &genesis_config,
-        &open_blockstore(&ledger_path),
+        &blockstore,
         account_paths,
         snapshot_config.as_ref(),
         process_options,
-    )
+    ).unwrap();
+
+    let slot = 4187144;
+    let parent = slot - 1;
+    let parent_bank = res.0.get(parent).unwrap();
+
+    let (verified_sender, verified_receiver) = unbounded();
+    let (vote_sender, vote_receiver) = unbounded();
+
+    let blockstore = Arc::new(blockstore);
+    let (exit, poh_recorder, poh_service, signal_receiver) =
+        create_test_recorder(&parent_bank, &blockstore, None);
+    let cluster_info = ClusterInfo::new_with_invalid_keypair(Node::new_localhost().info);
+    let cluster_info = Arc::new(RwLock::new(cluster_info));
+    let banking_stage = BankingStage::new(
+        &cluster_info,
+        &poh_recorder,
+        verified_receiver,
+        vote_receiver,
+        None,
+    );
+    {
+        let mut poh_recorder = poh_recorder.lock().unwrap();
+        poh_recorder.reset(parent_bank.last_blockhash(), parent_bank.slot(), Some((slot, slot + 4)));
+    }
+    let bank = Arc::new(Bank::new_from_parent(&parent_bank, &Pubkey::default(), slot));
+
+    poh_recorder.lock().unwrap().set_bank(&bank);
+
+    let load_result = blockstore
+        .get_slot_entries(slot, 0, None).unwrap();
+
+    let mut total_txs_ref = 0;
+    for entry in load_result {
+        if !entry.transactions.is_empty() {
+            total_txs_ref += entry.transactions.len();
+            verified_sender.send(to_packets_chunked(&entry.transactions, 10));
+        }
+    }
+    let mut total = 0;
+    loop {
+        if let Ok((_bank, (entry, _tick_height))) = signal_receiver.recv_timeout(Duration::from_millis(10)) {
+            total += entry.transactions.len();
+        }
+        if total >= total_txs_ref {
+            break;
+        }
+        if poh_recorder.lock().unwrap().bank().is_none() {
+            println!("no bank");
+            break;
+        }
+    }
+
+    Ok(res)
 }
 
 #[allow(clippy::cognitive_complexity)]

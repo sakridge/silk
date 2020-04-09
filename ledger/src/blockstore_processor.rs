@@ -546,14 +546,19 @@ pub fn confirm_slot(
 
     let num_entries = entries.len();
     let num_txs = entries.iter().map(|e| e.transactions.len()).sum::<usize>();
-    trace!(
-        "Fetched entries for slot {}, num_entries: {}, num_shreds: {}, num_txs: {}, slot_full: {}",
-        slot,
-        num_entries,
-        num_shreds,
-        num_txs,
-        slot_full,
-    );
+    if slot == 4187144 {
+        info!(
+            "Fetched entries for slot {}, num_entries: {}, num_shreds: {}, num_txs: {}, slot_full: {}",
+            slot,
+            num_entries,
+            num_shreds,
+            num_txs,
+            slot_full,
+        );
+        for (i, entry) in entries.iter().enumerate() {
+            info!("{} {:?}", i, entry);
+        }
+    }
 
     if !skip_verification {
         let tick_hash_count = &mut progress.tick_hash_count;
@@ -640,6 +645,7 @@ fn process_next_slots(
     leader_schedule_cache: &LeaderScheduleCache,
     pending_slots: &mut Vec<(SlotMeta, Arc<Bank>, Hash)>,
     fork_info: &mut HashMap<u64, (Arc<Bank>, BankForksInfo)>,
+    dev_halt_at_slot: u64,
 ) -> result::Result<(), BlockstoreProcessorError> {
     if let Some(parent) = bank.parent() {
         fork_info.remove(&parent.slot());
@@ -662,6 +668,9 @@ fn process_next_slots(
                 BlockstoreProcessorError::FailedToLoadMeta
             })?
             .unwrap();
+        if *next_slot > dev_halt_at_slot {
+            break;
+        }
 
         // Only process full slots in blockstore_processor, replay_stage
         // handles any partials
@@ -706,6 +715,7 @@ fn process_pending_slots(
     let mut last_status_report = Instant::now();
     let mut pending_slots = vec![];
     let mut last_root_slot = root_bank.slot();
+    let dev_halt_at_slot = opts.dev_halt_at_slot.unwrap_or(std::u64::MAX);
     process_next_slots(
         root_bank,
         root_meta,
@@ -713,9 +723,9 @@ fn process_pending_slots(
         leader_schedule_cache,
         &mut pending_slots,
         &mut fork_info,
+        dev_halt_at_slot,
     )?;
 
-    let dev_halt_at_slot = opts.dev_halt_at_slot.unwrap_or(std::u64::MAX);
     while !pending_slots.is_empty() {
         let (meta, bank, last_entry_hash) = pending_slots.pop().unwrap();
         let slot = bank.slot();
@@ -760,6 +770,7 @@ fn process_pending_slots(
             leader_schedule_cache,
             &mut pending_slots,
             &mut fork_info,
+            dev_halt_at_slot,
         )?;
 
         if slot >= dev_halt_at_slot {

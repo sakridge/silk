@@ -141,19 +141,20 @@ fn transfer(from: &KeyedAccount, to: &mut Account, lamports: u64) -> Result<(), 
     }
 
     if from.signer_key().is_none() {
-        debug!("Transfer: from must sign");
+        info!("Transfer: from must sign");
         return Err(InstructionError::MissingRequiredSignature);
     }
 
     if !from.data_is_empty()? {
-        debug!("Transfer: `from` must not carry data");
+        info!("Transfer: `from` must not carry data");
         return Err(InstructionError::InvalidArgument);
     }
     if lamports > from.lamports()? {
-        debug!(
-            "Transfer: insufficient lamports ({}, need {})",
+        info!(
+            "Transfer: insufficient lamports ({}, need {}) from: {:?}",
             from.lamports()?,
-            lamports
+            lamports,
+            from,
         );
         return Err(SystemError::ResultWithNegativeLamports.into());
     }

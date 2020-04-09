@@ -2,6 +2,7 @@
 //! programs. It offers a high-level API that signs transactions
 //! on behalf of the caller, and a low-level API for when they have
 //! already been signed and verified.
+use std::str::FromStr;
 use crate::{
     accounts::{Accounts, TransactionAccounts, TransactionLoadResult, TransactionLoaders},
     accounts_db::{AccountsDBSerialize, ErrorCounters, SnapshotStorage, SnapshotStorages},
@@ -397,6 +398,7 @@ impl Bank {
 
     /// Create a new bank that points to an immutable checkpoint of another bank.
     pub fn new_from_parent(parent: &Arc<Bank>, collector_id: &Pubkey, slot: Slot) -> Self {
+        info!("{} new from parent: {}", slot, parent.slot());
         parent.freeze();
         assert_ne!(slot, parent.slot());
 
@@ -1370,6 +1372,26 @@ impl Bank {
                 (Ok((accounts, loaders, _rents)), hash_age_kind) => {
                     signature_count += u64::from(tx.message().header.num_required_signatures);
 
+                    let mut print = false;
+                    for key in &tx.message().account_keys {
+                        if *key == Pubkey::from_str("5GGSqfxPar44zoYFtF1oFps5ibGk8hEtGpAC4dEotxSY").unwrap() {
+                            print = true;
+                            break;
+                        }
+                    }
+                    if print {
+                        info!("{} tx: {:?}", accounts.len(), tx);
+                        for account in accounts.iter() {
+                            info!("accounts: {:?}", account);
+                        }
+                    }
+                    if self.slot == 4187144 {
+                        /*if print {
+                            accounts[0].lamports += 10_000;
+                        }*/
+                        info!("process tx: {:?}", tx);
+                    }
+
                     let (account_refcells, loader_refcells) =
                         Self::into_refcells(accounts, loaders);
 
@@ -1404,7 +1426,9 @@ impl Bank {
                 tx_count += 1;
             } else {
                 if *err_count == 0 {
-                    debug!("tx error: {:?} {:?}", r, tx);
+                }
+                if self.slot == 4187144 {
+                    info!("tx error: {:?} {:?}", r, tx);
                 }
                 *err_count += 1;
             }

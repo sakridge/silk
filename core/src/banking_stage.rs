@@ -856,7 +856,7 @@ impl BankingStage {
 
         let mms_len = mms.len();
         let count: usize = mms.iter().map(|x| x.packets.len()).sum();
-        debug!(
+        info!(
             "@{:?} process start stalled for: {:?}ms txs: {} id: {}",
             timestamp(),
             duration_as_ms(&recv_start.elapsed()),

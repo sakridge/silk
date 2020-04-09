@@ -297,11 +297,33 @@ impl Accounts {
                             .get_fee_calculator(&tx.message().recent_blockhash)
                             .cloned(),
                     };
-                    let fee = if let Some(fee_calculator) = fee_calculator {
+                    let mut fee = if let Some(fee_calculator) = fee_calculator {
                         fee_calculator.calculate_fee(tx.message())
                     } else {
                         return (Err(TransactionError::BlockhashNotFound), hash_age_kind);
                     };
+
+                    use std::str::FromStr;
+                    let mut print = false;
+                    for key in &tx.message().account_keys {
+                        if *key == Pubkey::from_str("5GGSqfxPar44zoYFtF1oFps5ibGk8hEtGpAC4dEotxSY").unwrap() {
+                            print = true;
+                            break;
+                        }
+                    }
+                    if print {
+                        /*let mut highest = 0;
+                        for ancestor in ancestors.keys() {
+                            if *ancestor > highest {
+                                highest = *ancestor;
+                            }
+                        }
+                        if highest == 4187144 {
+                            fee = 0;
+                        }*/
+                        info!("fee: {:?}", fee);
+                    }
+
 
                     let load_res = self.load_tx_accounts(
                         &storage,

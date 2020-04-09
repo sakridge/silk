@@ -268,6 +268,13 @@ impl PohRecorder {
         self.grace_ticks = grace_ticks;
         self.leader_first_tick_height = leader_first_tick_height;
         self.leader_last_tick_height = leader_last_tick_height;
+        info!("start_slot: {} tick_height {} start_tick: {} leader: ({:?}, {:?}) grace_ticks: {}",
+              self.start_slot,
+              self.tick_height,
+              self.start_tick_height,
+              self.leader_first_tick_height,
+              self.leader_last_tick_height,
+              self.grace_ticks);
     }
 
     pub fn set_working_bank(&mut self, working_bank: WorkingBank) {

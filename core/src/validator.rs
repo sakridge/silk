@@ -310,11 +310,11 @@ impl Validator {
             leader_schedule_cache.slot_leader_at(bank.slot(), Some(&bank))
         );
 
-        if config.dev_halt_at_slot.is_some() {
+        /*if config.dev_halt_at_slot.is_some() {
             // Park with the RPC service running, ready for inspection!
             warn!("Validator halted");
             std::thread::park();
-        }
+        }*/
 
         let poh_config = Arc::new(genesis_config.poh_config);
         let (mut poh_recorder, entry_receiver) = PohRecorder::new_with_clear_signal(

@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "append-vec-tool",
     "bench-exchange",
     "bench-streamer",
     "bench-tps",

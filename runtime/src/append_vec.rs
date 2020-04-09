@@ -99,11 +99,14 @@ pub struct AppendVec {
     append_offset: Mutex<usize>,
     current_len: AtomicUsize,
     file_size: u64,
+    read_only: bool,
 }
 
 impl Drop for AppendVec {
     fn drop(&mut self) {
-        let _ignored = remove_file(&self.path);
+        if !self.read_only {
+            let _ignored = remove_file(&self.path);
+        }
     }
 }
 
@@ -156,11 +159,12 @@ impl AppendVec {
             append_offset: Mutex::new(initial_len),
             current_len: AtomicUsize::new(initial_len),
             file_size: size as u64,
+            read_only: false,
         }
     }
 
     #[allow(clippy::mutex_atomic)]
-    fn new_empty_map(current_len: usize) -> Self {
+    pub fn new_empty_map(current_len: usize, read_only: bool) -> Self {
         let map = MmapMut::map_anon(1).expect("failed to map the data file");
 
         AppendVec {
@@ -169,6 +173,7 @@ impl AppendVec {
             append_offset: Mutex::new(current_len),
             current_len: AtomicUsize::new(current_len),
             file_size: 0, // will be filled by set_file()
+            read_only,
         }
     }
 
@@ -500,7 +505,7 @@ impl<'a> serde::de::Visitor<'a> for AppendVecVisitor {
         let current_len: usize = deserialize_from(&mut rd).map_err(Error::custom)?;
         // Note this does not initialize a valid Mmap in the AppendVec, needs to be done
         // externally
-        Ok(AppendVec::new_empty_map(current_len))
+        Ok(AppendVec::new_empty_map(current_len, false))
     }
 }
 

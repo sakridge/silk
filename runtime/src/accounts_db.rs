@@ -610,6 +610,19 @@ impl AccountsDB {
         // but non-root stores should not be included in the snapshot
         storage.0.retain(|_slot_id, stores| !stores.is_empty());
 
+        let mut slots: Vec<_> = storage.0.keys().cloned().collect();
+        slots.sort();
+        for slot in slots {
+            let stores = storage.0.get(&slot).unwrap();
+            info!("slot: {} stores: {}", slot, stores.len());
+            for (id, store) in stores.iter() {
+                info!(" store: {} {:?}", store.id, *store.count_and_status.read().unwrap());
+                for account in store.accounts.accounts(0) {
+                    info!("  {:?}", account);
+                }
+            }
+        }
+
         let version: u64 = deserialize_from(&mut stream)
             .map_err(|_| AccountsDB::get_io_error("write version deserialize error"))?;
 
@@ -1287,6 +1300,9 @@ impl AccountsDB {
             |stored_account: &StoredAccount,
              _store_id: AppendVecId,
              accum: &mut HashMap<Pubkey, (u64, Hash)>| {
+                 if slot_id == 4187144 {
+                     info!("account: {:?}", stored_account);
+                 }
                 accum.insert(
                     stored_account.meta.pubkey,
                     (stored_account.meta.write_version, *stored_account.hash),
@@ -1307,7 +1323,7 @@ impl AccountsDB {
             .collect();
         let ret = Self::accumulate_account_hashes(hashes);
         accumulate.stop();
-        info!("{} {} {}", scan, merge, accumulate);
+        debug!("{} {} {}", scan, merge, accumulate);
         ret
     }
 
@@ -1488,7 +1504,18 @@ impl AccountsDB {
     }
 
     fn store_with_hashes(&self, slot_id: Slot, accounts: &[(&Pubkey, &Account)], hashes: &[Hash]) {
+        use std::str::FromStr;
         let mut store_accounts = Measure::start("store::store_accounts");
+        for (key, account) in accounts {
+            if **key == Pubkey::from_str("5GGSqfxPar44zoYFtF1oFps5ibGk8hEtGpAC4dEotxSY").unwrap() {
+                info!("store {} => {:?}", key, account);
+            }
+        }
+        if slot_id == 4187144 {
+            for (key, account) in accounts {
+                info!("{} => {:?}", key, account);
+            }
+        }
         let infos = self.store_accounts(slot_id, accounts, hashes);
         store_accounts.stop();
 
