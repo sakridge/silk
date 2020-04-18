@@ -199,7 +199,7 @@ impl Archiver {
         let gossip_service = GossipService::new(&cluster_info, None, node.sockets.gossip, &exit);
 
         info!("Connecting to the cluster via {:?}", cluster_entrypoint);
-        let (nodes, _) =
+        let (nodes, archivers) =
             match solana_core::gossip_service::discover_cluster(&cluster_entrypoint.gossip, 1) {
                 Ok(nodes_and_archivers) => nodes_and_archivers,
                 Err(e) => {
@@ -209,6 +209,11 @@ impl Archiver {
                     return Err(e.into());
                 }
             };
+        warn!("0nodes: {} {}", nodes.len(), archivers.len());
+        if nodes.is_empty() {
+            warn!("Archiver::new: No rpc peers: {:?} {:?}", nodes, archivers);
+            return Err(ArchiverError::NoRpcPeers);
+        }
         let client = solana_core::gossip_service::get_client(&nodes);
 
         info!("Setting up mining account...");

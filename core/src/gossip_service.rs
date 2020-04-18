@@ -190,6 +190,7 @@ fn spy(
     while !met_criteria {
         if let Some(secs) = timeout {
             if now.elapsed() >= Duration::from_secs(secs) {
+                warn!("timed-out");
                 break;
             }
         }
@@ -221,6 +222,7 @@ fn spy(
         if let Some(num) = num_nodes {
             if nodes.len() >= num {
                 if found_node_by_pubkey || found_node_by_gossip_addr {
+                    warn!("found num nodes");
                     met_criteria = true;
                 }
 

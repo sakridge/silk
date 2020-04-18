@@ -269,11 +269,12 @@ impl LocalCluster {
             cluster.add_validator(&listener_config, 0, Arc::new(Keypair::new()));
         });
 
-        discover_cluster(
+        let (nodes, archivers) = discover_cluster(
             &cluster.entry_point_info.gossip,
             config.node_stakes.len() + config.num_listeners as usize,
         )
         .unwrap();
+        warn!("nodes: {} {}", nodes.len(), archivers.len());
 
         for _ in 0..config.num_archivers {
             cluster.add_archiver();
