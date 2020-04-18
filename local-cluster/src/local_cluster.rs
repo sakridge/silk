@@ -274,7 +274,7 @@ impl LocalCluster {
             config.node_stakes.len() + config.num_listeners as usize,
         )
         .unwrap();
-        warn!("nodes: {} {}", nodes.len(), archivers.len());
+        //warn!("nodes: {} {}", nodes.len(), archivers.len());
 
         for _ in 0..config.num_archivers {
             cluster.add_archiver();

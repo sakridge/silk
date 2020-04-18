@@ -227,10 +227,12 @@ fn spy(
                 }
 
                 if find_node_by_pubkey.is_none() && find_node_by_gossip_addr.is_none() {
+                    warn!("found by pubkey");
                     met_criteria = true;
                 }
             }
         } else if found_node_by_pubkey || found_node_by_gossip_addr {
+            warn!("found by pubkey2");
             met_criteria = true;
         }
         if i % 20 == 0 {
