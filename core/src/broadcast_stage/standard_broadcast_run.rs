@@ -5,7 +5,7 @@ use super::{
 use crate::broadcast_stage::broadcast_utils::UnfinishedSlotInfo;
 use solana_ledger::{
     entry::Entry,
-    shred::{Shred, Shredder, RECOMMENDED_FEC_RATE, SHRED_TICK_REFERENCE_MASK},
+    shred::{Shred, Shredder, ShreddingStats, RECOMMENDED_FEC_RATE, SHRED_TICK_REFERENCE_MASK},
 };
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, timing::duration_as_us};
 use std::collections::HashMap;
@@ -104,9 +104,10 @@ impl StandardBroadcastRun {
         next_shred_index: u32,
         entries: &[Entry],
         is_slot_end: bool,
+        stats: &mut ShreddingStats,
     ) -> Vec<Shred> {
         let (data_shreds, new_next_shred_index) =
-            shredder.entries_to_data_shreds(entries, is_slot_end, next_shred_index);
+            shredder.entries_to_data_shreds(entries, is_slot_end, next_shred_index, stats);
 
         self.unfinished_slot = Some(UnfinishedSlotInfo {
             next_shred_index: new_next_shred_index,
@@ -176,12 +177,14 @@ impl StandardBroadcastRun {
             blockstore,
             (bank.tick_height() % bank.ticks_per_slot()) as u8,
         );
+        let mut shredding_stats = ShreddingStats::default();
         let is_last_in_slot = last_tick_height == bank.max_tick_height();
         let data_shreds = self.entries_to_data_shreds(
             &shredder,
             next_shred_index,
             &receive_results.entries,
             is_last_in_slot,
+            &mut shredding_stats,
         );
         // Insert the first shred so blockstore stores that the leader started this block
         // This must be done before the blocks are sent out over the wire.
@@ -231,17 +234,24 @@ impl StandardBroadcastRun {
                 .expect("Start timestamp must exist for a slot if we're broadcasting the slot"),
         });
 
+        // Send out data shreds.
         let data_shreds = Arc::new(data_shreds);
         socket_sender.send(((stakes.clone(), data_shreds.clone()), batch_info.clone()))?;
         blockstore_sender.send((data_shreds.clone(), batch_info.clone()))?;
-        let coding_shreds = shredder.data_shreds_to_coding_shreds(&data_shreds[0..last_data_shred]);
+
+        // Create and send coding shreds.
+        let coding_shreds = shredder
+            .data_shreds_to_coding_shreds(&data_shreds[0..last_data_shred], &mut shredding_stats);
         let coding_shreds = Arc::new(coding_shreds);
         socket_sender.send(((stakes, coding_shreds.clone()), batch_info.clone()))?;
         blockstore_sender.send((coding_shreds, batch_info))?;
+
         self.process_shreds_stats.update(&ProcessShredsStats {
             shredding_elapsed: duration_as_us(&to_shreds_elapsed),
             receive_elapsed: duration_as_us(&receive_elapsed),
+            shredding_stats,
         });
+
         if last_tick_height == bank.max_tick_height() {
             self.report_and_reset_stats();
             self.unfinished_slot = None;
@@ -348,6 +358,22 @@ impl StandardBroadcastRun {
             (
                 "slot_broadcast_time",
                 self.slot_broadcast_start.unwrap().elapsed().as_micros() as i64,
+                i64
+            ),
+            (
+                "serialize_entries",
+                stats.shredding_stats.serialize_entries_us as i64,
+                i64
+            ),
+            ("gen_data", stats.shredding_stats.gen_data_us as i64, i64),
+            (
+                "gen_coding",
+                stats.shredding_stats.gen_coding_us as i64,
+                i64
+            ),
+            (
+                "sign_coding",
+                stats.shredding_stats.sign_coding_us as i64,
                 i64
             ),
         );

@@ -1546,9 +1546,8 @@ impl ClusterInfo {
         scores: &[ResponseScore],
         now: u64,
         self_id: Pubkey,
-    ) -> (usize, usize) {
+    ) -> usize {
         let mut total_bytes = 0;
-        let mut total_sent = 0;
         for (i, stat) in scores.iter().enumerate() {
             let from_addr = pull_responses[stat.to].1;
             let response = pull_responses[stat.to].0[stat.responses_index].clone();
@@ -1576,15 +1575,26 @@ impl ClusterInfo {
 
                         total_bytes += new_packet.meta.size;
                         packets.packets.push(new_packet);
+                    } else {
+                        info!(
+                            "out of peer budget for {} size: {} last_ms: {}",
+                            from_addr,
+                            new_packet.meta.size,
+                            now - peer_budget.last_timestamp_ms
+                        );
+                        inc_new_counter_info!("gossip_pull_request-no_peer_budget", 1);
                     }
                 } else {
+                    info!(
+                        "out of gossip budget i: {} budget: {} packets: {}",
+                        i, w_outbound_budget.overall.bytes, new_packet.meta.size
+                    );
                     inc_new_counter_info!("gossip_pull_request-no_budget", 1);
-                    total_sent = i;
                     break;
                 }
             }
         }
-        (total_sent, total_bytes)
+        total_bytes
     }
 
     fn filter_response_bad_address(
@@ -1643,7 +1653,7 @@ impl ClusterInfo {
 
         let mut packets = Packets::new_with_recycler(recycler.clone(), 64, "handle_pull_requests");
 
-        let (total_sent, total_bytes) =
+        let total_bytes =
             Self::populate_packets(me, &mut packets, pull_responses, &scores, now, self_id);
 
         {
@@ -1656,20 +1666,21 @@ impl ClusterInfo {
         }
 
         time.stop();
-        inc_new_counter_info!("gossip_pull_request-sent_requests", total_sent);
         inc_new_counter_info!(
             "gossip_pull_request-dropped_requests",
-            scores.len() - total_sent
+            scores.len() - packets.packets.len()
         );
         info!(
             "handle_pull_requests: {} sent: {} total: {} total_bytes: {}",
             time,
-            total_sent,
+            packets.packets.len(),
             scores.len(),
             total_bytes
         );
         if packets.is_empty() {
             return None;
+        } else {
+            inc_new_counter_info!("gossip_pull_request-sent_requests", packets.packets.len());
         }
         Some(packets)
     }

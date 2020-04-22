@@ -10,7 +10,6 @@ use rayon::{
     ThreadPool,
 };
 use serde::{Deserialize, Serialize};
-use solana_metrics::datapoint_debug;
 use solana_perf::packet::Packet;
 use solana_rayon_threadlimit::get_thread_count;
 use solana_sdk::{
@@ -115,6 +114,14 @@ pub struct CodingShredHeader {
     pub num_data_shreds: u16,
     pub num_coding_shreds: u16,
     pub position: u16,
+}
+
+#[derive(Default, Clone)]
+pub struct ShreddingStats {
+    pub serialize_entries_us: u64,
+    pub gen_data_us: u64,
+    pub gen_coding_us: u64,
+    pub sign_coding_us: u64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -448,9 +455,10 @@ impl Shredder {
         is_last_in_slot: bool,
         next_shred_index: u32,
     ) -> (Vec<Shred>, Vec<Shred>, u32) {
+        let mut stats = ShreddingStats::default();
         let (data_shreds, last_shred_index) =
-            self.entries_to_data_shreds(entries, is_last_in_slot, next_shred_index);
-        let coding_shreds = self.data_shreds_to_coding_shreds(&data_shreds);
+            self.entries_to_data_shreds(entries, is_last_in_slot, next_shred_index, &mut stats);
+        let coding_shreds = self.data_shreds_to_coding_shreds(&data_shreds, &mut stats);
         (data_shreds, coding_shreds, last_shred_index)
     }
 
@@ -459,11 +467,12 @@ impl Shredder {
         entries: &[Entry],
         is_last_in_slot: bool,
         next_shred_index: u32,
+        stats: &mut ShreddingStats,
     ) -> (Vec<Shred>, u32) {
         let now = Instant::now();
         let serialized_shreds =
             bincode::serialize(entries).expect("Expect to serialize all entries");
-        let serialize_time = now.elapsed().as_millis();
+        let serialize_time = now.elapsed().as_micros() as u64;
 
         let now = Instant::now();
 
@@ -511,18 +520,19 @@ impl Shredder {
                     .collect()
             })
         });
-        let gen_data_time = now.elapsed().as_millis();
-        datapoint_debug!(
-            "shredding-stats",
-            ("slot", self.slot as i64, i64),
-            ("num_data_shreds", data_shreds.len() as i64, i64),
-            ("serializing", serialize_time as i64, i64),
-            ("gen_data", gen_data_time as i64, i64),
-        );
+        let gen_data_time = now.elapsed().as_micros() as u64;
+
+        stats.serialize_entries_us += serialize_time;
+        stats.gen_data_us += gen_data_time;
+
         (data_shreds, last_shred_index + 1)
     }
 
-    pub fn data_shreds_to_coding_shreds(&self, data_shreds: &[Shred]) -> Vec<Shred> {
+    pub fn data_shreds_to_coding_shreds(
+        &self,
+        data_shreds: &[Shred],
+        stats: &mut ShreddingStats,
+    ) -> Vec<Shred> {
         let now = Instant::now();
         let max_coding_shreds = data_shreds.len() > MAX_DATA_SHREDS_PER_FEC_BLOCK as usize;
         // 2) Generate coding shreds
@@ -542,7 +552,7 @@ impl Shredder {
                     .collect()
             })
         });
-        let gen_coding_time = now.elapsed().as_millis();
+        let gen_coding_time = now.elapsed().as_micros() as u64;
 
         let now = Instant::now();
         // 3) Sign coding shreds
@@ -553,14 +563,11 @@ impl Shredder {
                 })
             })
         });
-        let sign_coding_time = now.elapsed().as_millis();
+        let sign_coding_time = now.elapsed().as_micros() as u64;
 
-        datapoint_debug!(
-            "shredding-stats",
-            ("num_coding_shreds", coding_shreds.len() as i64, i64),
-            ("gen_coding", gen_coding_time as i64, i64),
-            ("sign_coding", sign_coding_time as i64, i64),
-        );
+        stats.gen_coding_us += gen_coding_time;
+        stats.sign_coding_us += sign_coding_time;
+
         coding_shreds
     }
 
@@ -1549,20 +1556,28 @@ pub mod tests {
             .collect();
 
         let start_index = 0x12;
-        let (data_shreds, _next_index) =
-            shredder.entries_to_data_shreds(&entries, true, start_index);
+        let (data_shreds, _next_index) = shredder.entries_to_data_shreds(
+            &entries,
+            true,
+            start_index,
+            &mut ShreddingStats::default(),
+        );
 
         assert!(data_shreds.len() > MAX_DATA_SHREDS_PER_FEC_BLOCK as usize);
 
         (1..=MAX_DATA_SHREDS_PER_FEC_BLOCK as usize)
             .into_iter()
             .for_each(|count| {
-                let coding_shreds = shredder.data_shreds_to_coding_shreds(&data_shreds[..count]);
+                let coding_shreds = shredder.data_shreds_to_coding_shreds(
+                    &data_shreds[..count],
+                    &mut ShreddingStats::default(),
+                );
                 assert_eq!(coding_shreds.len(), count);
             });
 
         let coding_shreds = shredder.data_shreds_to_coding_shreds(
             &data_shreds[..MAX_DATA_SHREDS_PER_FEC_BLOCK as usize + 1],
+            &mut ShreddingStats::default(),
         );
         assert_eq!(
             coding_shreds.len(),

@@ -1,4 +1,5 @@
 use super::*;
+use solana_ledger::shred::ShreddingStats;
 
 pub(crate) trait BroadcastStats {
     fn update(&mut self, new_stats: &Self);
@@ -17,11 +18,17 @@ pub(crate) struct ProcessShredsStats {
     // Per-slot elapsed time
     pub(crate) shredding_elapsed: u64,
     pub(crate) receive_elapsed: u64,
+    pub(crate) shredding_stats: ShreddingStats,
 }
 impl ProcessShredsStats {
     pub(crate) fn update(&mut self, new_stats: &ProcessShredsStats) {
         self.shredding_elapsed += new_stats.shredding_elapsed;
         self.receive_elapsed += new_stats.receive_elapsed;
+
+        self.shredding_stats.serialize_entries_us += new_stats.shredding_stats.serialize_entries_us;
+        self.shredding_stats.gen_data_us += new_stats.shredding_stats.gen_data_us;
+        self.shredding_stats.gen_coding_us += new_stats.shredding_stats.gen_coding_us;
+        self.shredding_stats.sign_coding_us += new_stats.shredding_stats.sign_coding_us;
     }
     pub(crate) fn reset(&mut self) {
         *self = Self::default();
