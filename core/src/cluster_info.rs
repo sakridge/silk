@@ -1548,6 +1548,8 @@ impl ClusterInfo {
         self_id: Pubkey,
     ) -> usize {
         let mut total_bytes = 0;
+        let mut peers_out_of_budget = HashMap::new();
+        let mut out_of_peer_budget = 0;
         for (i, stat) in scores.iter().enumerate() {
             let from_addr = pull_responses[stat.to].1;
             let response = pull_responses[stat.to].0[stat.responses_index].clone();
@@ -1576,13 +1578,8 @@ impl ClusterInfo {
                         total_bytes += new_packet.meta.size;
                         packets.packets.push(new_packet);
                     } else {
-                        info!(
-                            "out of peer budget for {} size: {} last_ms: {}",
-                            from_addr,
-                            new_packet.meta.size,
-                            now - peer_budget.last_timestamp_ms
-                        );
-                        inc_new_counter_info!("gossip_pull_request-no_peer_budget", 1);
+                        *peers_out_of_budget.entry(from_addr).or_insert(0) += 1;
+                        out_of_peer_budget += 1;
                     }
                 } else {
                     info!(
@@ -1593,6 +1590,10 @@ impl ClusterInfo {
                     break;
                 }
             }
+        }
+        if !peers_out_of_budget.is_empty() {
+            inc_new_counter_info!("gossip_pull_request-no_peer_budget", out_of_peer_budget);
+            info!("out of peer budget: {:?}", peers_out_of_budget);
         }
         total_bytes
     }
