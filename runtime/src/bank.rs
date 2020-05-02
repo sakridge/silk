@@ -1080,10 +1080,10 @@ impl Bank {
     ) -> Vec<Result<()>> {
         OrderedIterator::new(txs, iteration_order)
             .zip(lock_results)
-            .map(|(tx, lock_res)| {
-                if lock_res.is_ok() && tx.sanitize().is_err() {
+            .map(|(_tx, lock_res)| {
+                if lock_res.is_ok() {
                     error_counters.invalid_account_index += 1;
-                    Err(TransactionError::InvalidAccountIndex)
+                    Err(TransactionError::InvalidAccountIndex2)
                 } else {
                     lock_res.clone()
                 }
@@ -5973,5 +5973,139 @@ mod tests {
 
         let result = bank.process_transaction(&tx);
         assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn test_fuzz_instructions() {
+        solana_logger::setup();
+        use rand::{thread_rng, Rng};
+        let (genesis_config, _mint_keypair) = create_genesis_config(1_000_000_000);
+        let mut bank = Bank::new(&genesis_config);
+
+        let max_programs = 5;
+        let program_keys: Vec<_> = (0..max_programs).into_iter().map(|_| {
+            let key = Pubkey::new_rand();
+            bank.add_static_program(
+                "mock_vote",
+                key,
+                mock_ok_vote_processor,
+            );
+            key
+        }).collect();
+        let max_keys = 100;
+        let keys: Vec<_> = (0..max_keys).into_iter().map(|_| {
+            let key = Pubkey::new_rand();
+            if thread_rng().gen_ratio(9, 10) {
+                let lamports = if thread_rng().gen_ratio(1, 5) {
+                    thread_rng().gen_range(0, 10)
+                } else {
+                    thread_rng().gen_range(20, 100)
+                };
+                let space = thread_rng().gen_range(0, 10);
+                let owner = Pubkey::default();
+                let account = Account::new(lamports, space, &owner);
+                bank.store_account(&key, &account);
+            }
+            key
+        }).collect();
+        let mut results = HashMap::new();
+        for _ in 0..100 {
+            let num_keys = if thread_rng().gen_ratio(1, 5) {
+                thread_rng().gen_range(0, max_keys)
+            } else {
+                thread_rng().gen_range(1, 4)
+            };
+            let num_instructions = thread_rng().gen_range(0, max_keys - num_keys);
+
+            let min_program_index = if thread_rng().gen_ratio(1, 5) {
+                0
+            } else {
+                1
+            };
+            let instructions: Vec<_> =  if num_keys > 0 {
+                (0..num_instructions).into_iter().map(|_| {
+                    let num_accounts_to_pass = thread_rng().gen_range(0, num_keys);
+                    let account_indexes = (0..num_accounts_to_pass).into_iter().map(|_| thread_rng().gen_range(0, num_keys)).collect();
+                    let program_index: u8 = thread_rng().gen_range(min_program_index, program_keys.len()) as u8;
+                    CompiledInstruction::new(program_index, &10, account_indexes)
+                }).collect()
+            } else {
+                vec![]
+            };
+
+            let account_keys: Vec<_> = if thread_rng().gen_ratio(1, 5) {
+                (0..num_keys).into_iter().map(|_| {
+                    let idx = thread_rng().gen_range(0, keys.len());
+                    keys[idx]
+                }).collect()
+            } else {
+                use std::collections::HashSet;
+                let mut inserted = HashSet::new();
+                (0..num_keys).into_iter().map(|_| {
+                    let mut idx = 0;
+                    loop {
+                        idx = thread_rng().gen_range(0, keys.len());
+                        if !inserted.contains(&idx) {
+                            break;
+                        }
+                    }
+                    inserted.insert(idx);
+                    keys[idx]
+                }).collect()
+            };
+
+            let account_keys_len = std::cmp::max(account_keys.len(), 1);
+            let num_signatures = if thread_rng().gen_ratio(1, 5) {
+                thread_rng().gen_range(0, account_keys_len + 10)
+            } else {
+                thread_rng().gen_range(0, account_keys_len)
+            };
+
+            let num_required_signatures = if thread_rng().gen_ratio(1, 5) {
+                thread_rng().gen_range(0, account_keys_len + 10) as u8
+            } else {
+                thread_rng().gen_range(0, std::cmp::max(1, num_signatures)) as u8
+            };
+            let num_readonly_signed_accounts = if thread_rng().gen_ratio(1, 5) {
+                thread_rng().gen_range(0, account_keys_len) as u8
+            } else {
+                let max = if num_required_signatures > 1 {
+                    num_required_signatures - 1
+                } else {
+                    1
+                };
+                thread_rng().gen_range(0, max) as u8
+            };
+
+            let num_readonly_unsigned_accounts = if thread_rng().gen_ratio(1, 5) || (num_required_signatures as usize) >= account_keys_len {
+                thread_rng().gen_range(0, account_keys_len) as u8
+            } else {
+                thread_rng().gen_range(0, account_keys_len - num_required_signatures as usize) as u8
+            };
+
+            let header = MessageHeader {
+                num_required_signatures,
+                num_readonly_signed_accounts,
+                num_readonly_unsigned_accounts,
+            };
+            let message = Message {
+                header,
+                account_keys,
+                recent_blockhash: bank.last_blockhash(),
+                instructions,
+            };
+
+            let tx = Transaction {
+                signatures: vec![Signature::default(); num_signatures],
+                message,
+            };
+
+            let result = bank.process_transaction(&tx);
+            info!("result: {:?}", result);
+            let result_key = format!("{:?}", result);
+            *results.entry(result_key).or_insert(0) += 1;
+            //assert_eq!(result, Ok(()));
+        }
+        info!("results: {:?}", results);
     }
 }
