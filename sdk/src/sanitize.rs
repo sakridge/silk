@@ -8,6 +8,8 @@ pub enum SanitizeError {
     ValueOutOfBounds,
     #[error("invalid value")]
     InvalidValue,
+    #[error("invalid value")]
+    NoFeePayer,
 }
 
 /// Trait for sanitizing values and members of over the wire messages.

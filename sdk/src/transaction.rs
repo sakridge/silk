@@ -1,5 +1,6 @@
 //! Defines a Transaction type to package an atomic sequence of instructions.
 
+use log::*;
 use crate::sanitize::{Sanitize, SanitizeError};
 use crate::{
     hash::Hash,
@@ -64,6 +65,13 @@ pub enum TransactionError {
 
     /// This program may not be used for executing instructions
     InvalidProgramForExecution,
+
+    /// Transaction sanitize failed
+    SanitizeFailure,
+    SanitizeFailureDuplicates,
+    SanitizeFailureNoFeePayer,
+
+    InvalidAccountIndex2,
 }
 
 pub type Result<T> = result::Result<T, TransactionError>;
@@ -90,9 +98,11 @@ pub struct Transaction {
 impl Sanitize for Transaction {
     fn sanitize(&self) -> std::result::Result<(), SanitizeError> {
         if self.message.header.num_required_signatures as usize > self.signatures.len() {
+            info!("num_required > signatures.len()");
             return Err(SanitizeError::IndexOutOfBounds);
         }
         if self.signatures.len() > self.message.account_keys.len() {
+            info!("signatures.len() > account_keys.len()");
             return Err(SanitizeError::IndexOutOfBounds);
         }
         self.message.sanitize()

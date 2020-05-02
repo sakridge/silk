@@ -1,5 +1,6 @@
 //! A library for generating a message from a sequence of instructions
 
+use log::*;
 use crate::sanitize::{Sanitize, SanitizeError};
 use crate::{
     hash::Hash,
@@ -165,36 +166,44 @@ pub struct Message {
 
 impl Sanitize for Message {
     fn sanitize(&self) -> std::result::Result<(), SanitizeError> {
+        info!("enter sanitize");
         // signing area and read-only non-signing area should not overlap
         if self.header.num_required_signatures as usize
             + self.header.num_readonly_unsigned_accounts as usize
             > self.account_keys.len()
         {
+            info!("num_req_signatures + num_unsigned > account_keys.len()");
             return Err(SanitizeError::IndexOutOfBounds);
         }
 
         // there should be at least 1 RW fee-payer account.
         if self.header.num_readonly_signed_accounts >= self.header.num_required_signatures {
-            return Err(SanitizeError::IndexOutOfBounds);
+            info!("0 fee-payer accounts {:?}", self.header);
+            return Err(SanitizeError::NoFeePayer);
         }
 
         for ci in &self.instructions {
             if ci.program_id_index as usize >= self.account_keys.len() {
+                info!("program_id out of bounds");
                 return Err(SanitizeError::IndexOutOfBounds);
             }
             // A program cannot be a payer.
             if ci.program_id_index == 0 {
+                info!("program_id cannot be payer");
                 return Err(SanitizeError::IndexOutOfBounds);
             }
             for ai in &ci.accounts {
                 if *ai as usize >= self.account_keys.len() {
+                    info!("program accounts index larger than keys");
                     return Err(SanitizeError::IndexOutOfBounds);
                 }
             }
         }
+        info!("here?");
         self.account_keys.sanitize()?;
         self.recent_blockhash.sanitize()?;
         self.instructions.sanitize()?;
+        info!("here2?");
         Ok(())
     }
 }
