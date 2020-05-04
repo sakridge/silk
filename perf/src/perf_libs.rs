@@ -91,6 +91,9 @@ pub struct Api<'a> {
         Symbol<'a, unsafe extern "C" fn(ptr: *mut c_void, size: usize, flags: c_uint) -> c_int>,
 
     pub cuda_host_unregister: Symbol<'a, unsafe extern "C" fn(ptr: *mut c_void) -> c_int>,
+
+    pub ed25519_get_checked_scalar:
+        Symbol<'a, unsafe extern "C" fn(out_scalar: *mut u8, in_scalar: *const u8) -> c_int>,
 }
 
 static mut API: Option<Container<Api>> = None;
