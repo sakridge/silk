@@ -22,7 +22,8 @@ solana-rayon-threadlimit = { path = "../rayon-threadlimit", version = "1.2.0" }
 solana-budget-program = { path = "../programs/budget", version = "1.2.0" }
 solana-logger = { path = "../logger", version = "1.2.0" }
 solana-metrics = { path = "../metrics", version = "1.2.0" }
-curve25519-dalek = { version = "2" }
+#curve25519-dalek = { version = "2" }
+curve25519-dalek = { path = "../../src/curve25519-dalek" }
 
 [lib]
 name = "solana_perf"

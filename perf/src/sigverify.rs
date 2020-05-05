@@ -293,6 +293,21 @@ pub fn copy_return_values(sig_lens: &[Vec<u32>], out: &PinnedVec<u8>, rvs: &mut 
     }
 }
 
+pub fn is_packed_ge_small_order(ge: &[u8; 32]) -> bool {
+    if let Some(api) = perf_libs::api() {
+        unsafe {
+            let res = (api.ed25519_is_packed_ge_small_order)(ge.as_ptr());
+
+            if res == 0 {
+                return false;
+            } else {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 pub fn get_checked_scalar(scalar: &[u8; 32]) -> Result<[u8; 32], PacketError> {
     let mut out = [0u8; 32];
     if let Some(api) = perf_libs::api() {
@@ -746,12 +761,12 @@ mod tests {
 
         let recycler = Recycler::default();
         let recycler_out = Recycler::default();
-        for _ in 0..100 {
-            let n = thread_rng().gen_range(1, 50);
-            let num_batches = thread_rng().gen_range(2, 50);
+        for _ in 0..50 {
+            let n = thread_rng().gen_range(1, 30);
+            let num_batches = thread_rng().gen_range(2, 30);
             let mut batches = generate_packet_vec(&packet, n, num_batches);
 
-            let num_modifications = thread_rng().gen_range(0, 10);
+            let num_modifications = thread_rng().gen_range(0, 5);
             for _ in 0..num_modifications {
                 let batch = thread_rng().gen_range(0, batches.len());
                 let packet = thread_rng().gen_range(0, batches[batch].packets.len());
@@ -766,7 +781,7 @@ mod tests {
 
             let cpu_ref = ed25519_verify_cpu(&batches);
 
-            info!("ans: {:?} ref: {:?}", ans, cpu_ref);
+            //info!("ans: {:?} ref: {:?}", ans, cpu_ref);
             // check result
             assert_eq!(ans, cpu_ref);
         }
@@ -791,7 +806,7 @@ mod tests {
 
         let passed_g = AtomicU64::new(0);
         let failed_g = AtomicU64::new(0);
-        (0..8).into_par_iter().for_each(|_| {
+        (0..4).into_par_iter().for_each(|_| {
             let mut input = [0u8; 32];
             let mut passed = 0;
             let mut failed = 0;
@@ -805,6 +820,49 @@ mod tests {
                 } else {
                     failed += 1;
                     assert!(ans.is_err());
+                }
+            }
+            passed_g.fetch_add(passed, Ordering::Relaxed);
+            failed_g.fetch_add(failed, Ordering::Relaxed);
+        });
+        info!(
+            "passed: {} failed: {}",
+            passed_g.load(Ordering::Relaxed),
+            failed_g.load(Ordering::Relaxed)
+        );
+    }
+
+    #[test]
+    fn test_ge_small_order() {
+        solana_logger::setup();
+        use curve25519_dalek::edwards::CompressedEdwardsY;
+        use rand::{thread_rng, Rng};
+        use rayon::prelude::*;
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        if perf_libs::api().is_none() {
+            return;
+        }
+
+        let passed_g = AtomicU64::new(0);
+        let failed_g = AtomicU64::new(0);
+        (0..4).into_iter().for_each(|_| {
+            let mut input = [0u8; 32];
+            let mut passed = 0;
+            let mut failed = 0;
+            for _ in 0..1_000_000 {
+                thread_rng().fill(&mut input);
+                let ans = is_packed_ge_small_order(&input);
+                let ref_ge = CompressedEdwardsY::from_slice(&input);
+                if let Some(ref_element) = ref_ge.decompress() {
+                    assert_eq!(ref_element.is_small_order(), ans);
+                } else {
+                    assert!(!ans);
+                }
+                if ans {
+                    passed += 1;
+                } else {
+                    failed += 1;
                 }
             }
             passed_g.fetch_add(passed, Ordering::Relaxed);

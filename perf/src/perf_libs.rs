@@ -94,6 +94,9 @@ pub struct Api<'a> {
 
     pub ed25519_get_checked_scalar:
         Symbol<'a, unsafe extern "C" fn(out_scalar: *mut u8, in_scalar: *const u8) -> c_int>,
+
+    pub ed25519_is_packed_ge_small_order:
+        Symbol<'a, unsafe extern "C" fn(packed_ge: *const u8) -> c_int>,
 }
 
 static mut API: Option<Container<Api>> = None;
