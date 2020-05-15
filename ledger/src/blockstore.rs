@@ -695,13 +695,14 @@ impl Blockstore {
         );
     }
 
-    fn try_shred_recovery(
-        db: &Database,
+    pub fn try_shred_recovery(
+        self,
         erasure_metas: &HashMap<(u64, u64), ErasureMeta>,
         index_working_set: &mut HashMap<u64, IndexMetaWorkingSetEntry>,
         prev_inserted_datas: &mut HashMap<(u64, u64), Shred>,
         prev_inserted_codes: &mut HashMap<(u64, u64), Shred>,
     ) -> Vec<Shred> {
+        let db = self.db();
         let data_cf = db.column::<cf::ShredData>();
         let code_cf = db.column::<cf::ShredCode>();
         let mut recovered_data_shreds = vec![];
@@ -766,7 +767,7 @@ impl Blockstore {
     pub fn insert_shreds_handle_duplicate<F>(
         &self,
         shreds: Vec<Shred>,
-        leader_schedule: Option<&Arc<LeaderScheduleCache>>,
+        _leader_schedule: Option<&Arc<LeaderScheduleCache>>,
         is_trusted: bool,
         handle_duplicate: &F,
         metrics: &mut BlockstoreInsertionMetrics,
@@ -824,52 +825,7 @@ impl Blockstore {
         start.stop();
 
         let insert_shreds_elapsed = start.as_us();
-        let mut start = Measure::start("Shred recovery");
-        let mut num_recovered = 0;
-        if let Some(leader_schedule_cache) = leader_schedule {
-            let recovered_data = Self::try_shred_recovery(
-                &db,
-                &erasure_metas,
-                &mut index_working_set,
-                &mut just_inserted_data_shreds,
-                &mut just_inserted_coding_shreds,
-            );
-
-            num_recovered = recovered_data.len();
-            recovered_data.into_iter().for_each(|shred| {
-                if let Some(leader) = leader_schedule_cache.slot_leader_at(shred.slot(), None) {
-                    if shred.verify(&leader) {
-                        self.check_insert_data_shred(
-                            shred,
-                            &mut erasure_metas,
-                            &mut index_working_set,
-                            &mut slot_meta_working_set,
-                            &mut write_batch,
-                            &mut just_inserted_data_shreds,
-                            &mut index_meta_time,
-                            is_trusted,
-                            &handle_duplicate,
-                        );
-                    }
-                }
-            });
-        }
-        start.stop();
-        let shred_recovery_elapsed = start.as_us();
-
-        just_inserted_coding_shreds
-            .into_iter()
-            .for_each(|((_, _), shred)| {
-                self.check_insert_coding_shred(
-                    shred,
-                    &mut index_working_set,
-                    &mut write_batch,
-                    &mut index_meta_time,
-                );
-                num_inserted += 1;
-            });
-
-        let mut start = Measure::start("Shred recovery");
+        let mut start = Measure::start("handle chaining");
         // Handle chaining for the members of the slot_meta_working_set that were inserted into,
         // drop the others
         handle_chaining(&self.db, &mut write_batch, &mut slot_meta_working_set)?;
@@ -913,12 +869,10 @@ impl Blockstore {
         metrics.total_elapsed += total_start.as_us();
         metrics.insert_lock_elapsed += insert_lock_elapsed;
         metrics.insert_shreds_elapsed += insert_shreds_elapsed;
-        metrics.shred_recovery_elapsed += shred_recovery_elapsed;
         metrics.chaining_elapsed += chaining_elapsed;
         metrics.commit_working_sets_elapsed += commit_working_sets_elapsed;
         metrics.write_batch_elapsed += write_batch_elapsed;
         metrics.num_inserted += num_inserted;
-        metrics.num_recovered += num_recovered;
         metrics.index_meta_time += index_meta_time;
 
         Ok(())
