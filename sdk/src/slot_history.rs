@@ -31,8 +31,11 @@ pub enum Check {
 
 impl SlotHistory {
     pub fn add(&mut self, slot: Slot) {
-        for skipped in self.next_slot..slot {
-            self.bits.set(skipped % MAX_ENTRIES, false);
+        let mut current = slot % MAX_ENTRIES;
+        let end = self.next_slot % MAX_ENTRIES;
+        while current > end {
+            self.bits.set(current, false);
+            current -= 1;
         }
         self.bits.set(slot % MAX_ENTRIES, true);
         self.next_slot = slot + 1;
@@ -56,7 +59,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test() {
+    fn slot_history_test() {
         let mut slot_history = SlotHistory::default();
         slot_history.add(2);
         assert_eq!(slot_history.check(0), Check::Found);
