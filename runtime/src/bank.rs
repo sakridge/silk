@@ -112,7 +112,7 @@ pub struct BankRc {
 }
 
 impl BankRc {
-    pub fn from_stream<R: Read, P: AsRef<Path>>(
+    pub fn from_stream<R: Read, P: AsRef<Path> + Send + Sync>(
         account_paths: &[PathBuf],
         slot: Slot,
         ancestors: &Ancestors,

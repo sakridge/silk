@@ -102,7 +102,7 @@ impl Accounts {
             .freeze_accounts(ancestors, frozen_account_pubkeys);
     }
 
-    pub fn from_stream<R: Read, P: AsRef<Path>>(
+    pub fn from_stream<R: Read, P: AsRef<Path> + Send + Sync>(
         account_paths: &[PathBuf],
         ancestors: &Ancestors,
         frozen_account_pubkeys: &[Pubkey],

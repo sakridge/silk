@@ -18,6 +18,7 @@
 //! tracks the number of commits to the entire data store. So the latest
 //! commit for each slot entry would be indexed.
 
+use std::time::Instant;
 use crate::{
     accounts_index::{AccountsIndex, Ancestors, SlotList, SlotSlice},
     append_vec::{AppendVec, StoredAccount, StoredMeta},
@@ -581,7 +582,7 @@ impl AccountsDB {
         }
     }
 
-    pub fn accounts_from_stream<R: Read, P: AsRef<Path>>(
+    pub fn accounts_from_stream<R: Read, P: AsRef<Path> + Send + Sync>(
         &self,
         mut stream: &mut BufReader<R>,
         stream_append_vecs_path: P,
@@ -591,11 +592,16 @@ impl AccountsDB {
         let storage: AccountStorage = deserialize_from_snapshot(&mut stream)
             .map_err(|e| AccountsDB::get_io_error(&e.to_string()))?;
 
+        let stream_append_vecs_path = Arc::new(stream_append_vecs_path);
+        let total_stores: usize = storage.0.iter().map(|(_slot, storage)| storage.len()).sum();
+        info!("Processing {} stores in {} slots", total_stores, storage.0.len());
+        let mut processed = 0;
         // Remap the deserialized AppendVec paths to point to correct local paths
         let new_storage_map: Result<HashMap<Slot, SlotStores>, IOError> = storage
             .0
             .into_iter()
             .map(|(slot, mut slot_storage)| {
+                let stream_append_vecs_path = stream_append_vecs_path.clone();
                 let mut new_slot_storage = HashMap::new();
                 for (id, storage_entry) in slot_storage.drain() {
                     let path_index = thread_rng().gen_range(0, self.paths.len());
@@ -608,6 +614,7 @@ impl AccountsDB {
                     let append_vec_relative_path =
                         AppendVec::new_relative_path(slot, storage_entry.id);
                     let append_vec_abs_path = stream_append_vecs_path
+                        .as_ref()
                         .as_ref()
                         .join(&append_vec_relative_path);
                     let target = local_dir.join(append_vec_abs_path.file_name().unwrap());
@@ -638,6 +645,10 @@ impl AccountsDB {
                         .set_file(local_path)
                         .map_err(|e| AccountsDB::get_io_error(&e.to_string()))?;
                     new_slot_storage.insert(id, Arc::new(u_storage_entry));
+                    /*if last_print.elapsed().as_millis() > 2000 {
+                        info!("processed {} in {}ms", processed, last_print.elapsed().as_millis());
+                        last_print = Instant::now();
+                    }*/
                 }
                 Ok((slot, new_slot_storage))
             })

@@ -589,7 +589,7 @@ fn rebuild_bank_from_snapshots<P>(
     genesis_config: &GenesisConfig,
 ) -> Result<Bank>
 where
-    P: AsRef<Path>,
+    P: AsRef<Path> + Sync + Send,
 {
     info!("snapshot version: {}", snapshot_version);
 
