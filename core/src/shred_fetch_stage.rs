@@ -78,7 +78,7 @@ impl ShredFetchStage {
         p.meta.discard = true;
         if let Some((slot, index)) = Self::get_slot_index(p, stats) {
             // Seems reasonable to limit shreds to 2 epochs away
-            if slot > last_root && slot < (last_slot + 2 * slots_per_epoch) {
+            if slot > last_root && slot < (last_slot + 16 * slots_per_epoch) {
                 // Shred filter
                 let slot_received = shreds_received
                     .entry(slot)
@@ -91,6 +91,10 @@ impl ShredFetchStage {
                     stats.duplicate_shred += 1;
                 }
             } else {
+                info!(
+                    "filtered slot: {} root: {} slots_per_epoch: {}",
+                    slot, last_root, slots_per_epoch
+                );
                 stats.slot_out_of_range += 1;
             }
         }
