@@ -370,6 +370,7 @@ impl EntrySlice for [Entry] {
         });
 
         let poh_duration_us = timing::duration_as_us(&now.elapsed());
+        info!("verify generic: {} {}", self.len(), poh_duration_us);
         EntryVerificationState {
             verification_status: if res {
                 EntryVerificationStatus::Success
@@ -454,6 +455,7 @@ impl EntrySlice for [Entry] {
             })
         });
         let poh_duration_us = timing::duration_as_us(&now.elapsed());
+        info!("verify simd: {} {}", self.len(), poh_duration_us);
         EntryVerificationState {
             verification_status: if res {
                 EntryVerificationStatus::Success

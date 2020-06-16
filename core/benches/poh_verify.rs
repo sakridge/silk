@@ -7,8 +7,8 @@ use solana_sdk::signature::{Keypair, Signer};
 use solana_sdk::system_transaction;
 use test::Bencher;
 
-const NUM_HASHES: u64 = 400;
-const NUM_ENTRIES: usize = 800;
+const NUM_HASHES: u64 = 10_000;
+const NUM_ENTRIES: usize = 64;
 
 #[bench]
 fn bench_poh_verify_ticks(bencher: &mut Bencher) {
