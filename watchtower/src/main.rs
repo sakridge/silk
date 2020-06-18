@@ -1,6 +1,6 @@
 //! A command-line executable for monitoring the health of a cluster
 
-use clap::{crate_description, crate_name, value_t, value_t_or_exit, App, Arg};
+use clap::{crate_description, crate_name, value_t, value_t_or_exit, values_t, App, Arg};
 use log::*;
 use solana_clap_utils::{
     input_parsers::pubkeys_of,
@@ -27,7 +27,7 @@ use std::{
 struct Config {
     interval: Duration,
     json_rpc_url: String,
-    validator_identity_pubkeys: Vec<String>,
+    validator_identity_pubkeys: Vec<(String, String)>,
     no_duplicate_notifications: bool,
     monitor_active_stake: bool,
     notify_on_transactions: bool,
@@ -94,6 +94,14 @@ fn get_config() -> Config {
                 .help("Monitor a specific validator only instead of the entire cluster"),
         )
         .arg(
+            Arg::with_name("validator_names")
+                .long("validator-name")
+                .value_name("PRETTY NAME FOR VALIDATOR")
+                .takes_value(true)
+                .multiple(true)
+                .help("Give a special name to your validator."),
+        )
+        .arg(
             Arg::with_name("no_duplicate_notifications")
                 .long("no-duplicate-notifications")
                 .takes_value(false)
@@ -128,6 +136,20 @@ fn get_config() -> Config {
         .unwrap_or_else(Vec::new)
         .into_iter()
         .map(|i| i.to_string())
+        .collect();
+
+    let mut validator_names: Vec<_> =
+        values_t!(matches, "validator_names", String).unwrap_or_else(|_| {
+            (0..validator_identity_pubkeys.len())
+                .into_iter()
+                .map(|_| String::new())
+                .collect()
+        });
+    validator_names.resize(validator_identity_pubkeys.len(), String::new());
+
+    let validator_identity_pubkeys = validator_identity_pubkeys
+        .into_iter()
+        .zip(validator_names)
         .collect();
 
     let no_duplicate_notifications = matches.is_present("no_duplicate_notifications");
@@ -384,19 +406,27 @@ fn main() -> Result<(), Box<dyn error::Error>> {
                     }
                 } else {
                     let mut errors = vec![];
-                    for validator_identity in config.validator_identity_pubkeys.iter() {
+                    for (validator_identity, validator_name) in
+                        config.validator_identity_pubkeys.iter()
+                    {
                         if vote_accounts
                             .delinquent
                             .iter()
                             .any(|vai| vai.node_pubkey == *validator_identity)
                         {
-                            errors.push(format!("{} delinquent", validator_identity));
+                            errors.push(format!(
+                                "{} ({}) delinquent",
+                                validator_identity, validator_name
+                            ));
                         } else if !vote_accounts
                             .current
                             .iter()
                             .any(|vai| vai.node_pubkey == *validator_identity)
                         {
-                            errors.push(format!("{} missing", validator_identity));
+                            errors.push(format!(
+                                "{} ({}) missing",
+                                validator_identity, validator_name
+                            ));
                         }
 
                         rpc_client
@@ -408,12 +438,18 @@ fn main() -> Result<(), Box<dyn error::Error>> {
                                     // find some more SOL
                                     failures.push((
                                         "balance",
-                                        format!("{} has {} SOL", validator_identity, balance),
+                                        format!(
+                                            "{} ({}) has {} SOL",
+                                            validator_identity, validator_name, balance
+                                        ),
                                     ));
                                 }
                             })
                             .unwrap_or_else(|err| {
-                                warn!("Failed to get balance of {}: {:?}", validator_identity, err);
+                                warn!(
+                                    "Failed to get balance of {} ({}): {:?}",
+                                    validator_identity, validator_name, err
+                                );
                             });
                     }
 
@@ -433,8 +469,8 @@ fn main() -> Result<(), Box<dyn error::Error>> {
         datapoint_info!("watchtower-sanity", ("ok", failure.is_none(), bool));
         if let Some((failure_test_name, failure_error_message)) = &failure {
             let notification_msg = format!(
-                "solana-watchtower: Error: {}: {}",
-                failure_test_name, failure_error_message
+                "solana-watchtower: Error: {}: {} network: {}",
+                failure_test_name, failure_error_message, config.json_rpc_url,
             );
             if !config.no_duplicate_notifications || last_notification_msg != notification_msg {
                 notifier.send(&notification_msg);
