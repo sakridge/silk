@@ -343,7 +343,8 @@ impl Signable for PruneData {
     }
 }
 
-struct PullData {
+#[derive(Clone)]
+pub struct PullData {
     pub from_addr: SocketAddr,
     pub caller: CrdsValue,
     pub filter: CrdsFilter,
@@ -1741,7 +1742,7 @@ impl ClusterInfo {
 
     // Pull requests take an incoming bloom filter of contained entries from a node
     // and tries to send back to them the values it detects are missing.
-    fn handle_pull_requests(
+    pub fn handle_pull_requests(
         &self,
         recycler: &PacketsRecycler,
         requests: Vec<PullData>,
@@ -1750,14 +1751,17 @@ impl ClusterInfo {
         // split the requests into addrs and filters
         let mut caller_and_filters = vec![];
         let mut addrs = vec![];
-        let mut time = Measure::start("handle_pull_requests");
+        let mut time = Measure::start("gossip");
         self.update_data_budget(stakes);
+        let mut callers = HashMap::new();
         for pull_data in requests {
+            *callers.entry(pull_data.caller.pubkey()).or_insert(0) += 1;
             caller_and_filters.push((pull_data.caller, pull_data.filter));
             addrs.push(pull_data.from_addr);
         }
         let now = timestamp();
         let self_id = self.id();
+        let caller_and_filters_len = caller_and_filters.len();
 
         let pull_responses = self
             .time_gossip_read_lock(
@@ -1765,10 +1769,14 @@ impl ClusterInfo {
                 &self.stats.generate_pull_responses,
             )
             .generate_pull_responses(&caller_and_filters, now);
+        time.stop();
 
+        let mut process = Measure::start("process");
         self.time_gossip_write_lock("process_pull_reqs", &self.stats.process_pull_requests)
             .process_pull_requests(caller_and_filters, now);
+        process.stop();
 
+        let mut filter = Measure::start("filter");
         // Filter bad to addresses
         let pull_responses: Vec<_> = pull_responses
             .into_iter()
@@ -1813,7 +1821,9 @@ impl ClusterInfo {
 
         stats.sort_by(|a, b| a.score.cmp(&b.score));
         let weights: Vec<_> = stats.iter().map(|stat| stat.score).collect();
+        filter.stop();
 
+        let mut sample = Measure::start("sample");
         let seed = [48u8; 32];
         let rng = &mut ChaChaRng::from_seed(seed);
         let weighted_index = WeightedIndex::new(weights).unwrap();
@@ -1844,18 +1854,23 @@ impl ClusterInfo {
                 }
             }
         }
-        time.stop();
+        sample.stop();
         inc_new_counter_info!("gossip_pull_request-sent_requests", sent.len());
         inc_new_counter_info!(
             "gossip_pull_request-dropped_requests",
             stats.len() - sent.len()
         );
-        debug!(
-            "handle_pull_requests: {} sent: {} total: {} total_bytes: {}",
+        info!("callers: {:#?}", callers);
+        info!(
+            "handle_pull_requests: {} {} {} {} sent: {} total: {} total_bytes: {} caller_and_filters: {}",
             time,
+            filter,
+            process,
+            sample,
             sent.len(),
             stats.len(),
-            total_bytes
+            total_bytes,
+            caller_and_filters_len,
         );
         if packets.is_empty() {
             return None;
@@ -2053,12 +2068,21 @@ impl ClusterInfo {
         stakes: HashMap<Pubkey, u64>,
         epoch_time_ms: u64,
     ) {
+        use std::sync::Mutex;
         let sender = response_sender.clone();
+        let times_lens = Arc::new(Mutex::new(vec![]));
         thread_pool.install(|| {
             requests.into_par_iter().for_each_with(sender, |s, reqs| {
-                self.handle_packets(&recycler, &stakes, reqs, s, epoch_time_ms)
+                let reqs_len = reqs.packets.len();
+                let mut x = Measure::start("handle_packets");
+                self.handle_packets(&recycler, &stakes, reqs, s, epoch_time_ms);
+                x.stop();
+                times_lens.lock().unwrap().push((reqs_len, x.as_us()));
             });
         });
+        let mut l_times_lens = times_lens.lock().unwrap();
+        l_times_lens.sort_by(|a, b| a.1.cmp(&b.1));
+        info!("{:?}", *l_times_lens);
     }
 
     /// Process messages from the network

@@ -53,3 +53,30 @@ fn broadcast_shreds_bench(bencher: &mut Bencher) {
         .unwrap();
     });
 }
+
+
+#[bench]
+fn bench_pull_response(bencher: &mut Bencher) {
+    solana_logger::setup();
+    use solana_core::cluster_info::PullData;
+    use solana_core::crds_gossip_pull::CrdsFilter;
+    use solana_core::crds_value::{CrdsValue, CrdsData};
+    use solana_perf::packet::PacketsRecycler;
+    use solana_sdk::signature::Signature;
+    let cluster_info = ClusterInfo::new_with_invalid_keypair(ContactInfo::default());
+    for _ in 0..100_000 {
+        cluster_info.push_lowest_slot(Pubkey::new_rand(), thread_rng().gen_range(0, 100));
+    }
+    let recycler = PacketsRecycler::default();
+    let pull_requests: Vec<_> = (0..100).into_iter().map(|_| {
+        let crds_data = CrdsData::ContactInfo(ContactInfo::default());
+        let caller = CrdsValue { signature: Signature::default(), data: crds_data };
+        let filter = CrdsFilter::default();
+        let from_addr = "127.0.0.1:800".parse().unwrap();
+        PullData { from_addr, caller, filter }
+    }).collect();
+    let stakes = HashMap::new();
+    bencher.iter(move || {
+        let _ = cluster_info.handle_pull_requests(&recycler, pull_requests.clone(), &stakes);
+    });
+}
