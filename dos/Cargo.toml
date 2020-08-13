@@ -12,7 +12,8 @@ bincode = "1.3.1"
 clap = "2.33.1"
 log = "0.4.8"
 rand = "0.7.0"
-rayon = "1.3.1"
+#rayon = "1.3.1"
+rayon = { git = "https://github.com/rayon-rs/rayon.git" }
 solana-clap-utils = { path = "../clap-utils", version = "1.4.0" }
 solana-core = { path = "../core", version = "1.4.0" }
 solana-ledger = { path = "../ledger", version = "1.4.0" }

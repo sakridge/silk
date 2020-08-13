@@ -2652,8 +2652,7 @@ dependencies = [
 [[package]]
 name = "rayon"
 version = "1.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62f02856753d04e03e26929f820d0a0a337ebe71f849801eea335d464b349080"
+source = "git+https://github.com/rayon-rs/rayon.git#09428ec11d26d82d06ad6e848df504565e3b47ae"
 dependencies = [
  "autocfg 1.0.0",
  "crossbeam-deque",
@@ -2664,9 +2663,9 @@ dependencies = [
 [[package]]
 name = "rayon-core"
 version = "1.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e92e15d89083484e11353891f1af602cc661426deb9564c298b270c726973280"
+source = "git+https://github.com/rayon-rs/rayon.git#09428ec11d26d82d06ad6e848df504565e3b47ae"
 dependencies = [
+ "crossbeam-channel",
  "crossbeam-deque",
  "crossbeam-queue",
  "crossbeam-utils",
