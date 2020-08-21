@@ -4061,7 +4061,7 @@ pub mod tests {
         );
 
         // sendTransaction will fail due to insanity
-        bad_transaction.message.instructions[0].program_id_index = 255u8;
+        bad_transaction.message.instructions[0].program_id_index = 0u8;
         let recent_blockhash = bank_forks.read().unwrap().root_bank().last_blockhash();
         bad_transaction.sign(&[&mint_keypair], recent_blockhash);
         let req = format!(

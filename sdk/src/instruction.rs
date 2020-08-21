@@ -169,7 +169,7 @@ pub enum InstructionError {
     ComputationalBudgetExceeded,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Instruction {
     /// Pubkey of the instruction processor that executes this instruction
     pub program_id: Pubkey,

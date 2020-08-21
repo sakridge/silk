@@ -733,8 +733,22 @@ impl BankingStage {
         );
 
         let transactions = Self::deserialize_transactions(&packets);
+        let secp_verified_transactions: Vec<_> = transactions
+            .into_iter()
+            .map(|tx| {
+                if let Some(tx) = tx {
+                    if tx.verify_secp256k1().is_ok() {
+                        Some(tx)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect();
 
-        Self::filter_transaction_indexes(transactions, &transaction_indexes)
+        Self::filter_transaction_indexes(secp_verified_transactions, &transaction_indexes)
     }
 
     /// This function filters pending packets that are still valid

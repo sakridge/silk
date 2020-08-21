@@ -1,5 +1,6 @@
 use crate::clock::{DEFAULT_TICKS_PER_SECOND, DEFAULT_TICKS_PER_SLOT};
 use crate::message::Message;
+use crate::secp256k1_program;
 use log::*;
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug, AbiExample)]
@@ -26,7 +27,18 @@ impl FeeCalculator {
     }
 
     pub fn calculate_fee(&self, message: &Message) -> u64 {
-        self.lamports_per_signature * u64::from(message.header.num_required_signatures)
+        let mut num_secp_signatures: u64 = 0;
+        for instruction in &message.instructions {
+            let program_index = instruction.program_id_index as usize;
+            if program_index < message.account_keys.len() {
+                let id = message.account_keys[program_index];
+                if secp256k1_program::check_id(&id) {
+                    num_secp_signatures += 1;
+                }
+            }
+        }
+        self.lamports_per_signature
+            * (u64::from(message.header.num_required_signatures) + num_secp_signatures)
     }
 }
 
@@ -201,6 +213,27 @@ mod tests {
         let ix1 = system_instruction::transfer(&pubkey1, &pubkey0, 1);
         let message = Message::new(&[ix0, ix1], Some(&pubkey0));
         assert_eq!(FeeCalculator::new(2).calculate_fee(&message), 4);
+    }
+
+    #[test]
+    fn test_fee_calculator_calculate_fee_secp256k1() {
+        use crate::instruction::Instruction;
+        let pubkey0 = Pubkey::new(&[0; 32]);
+        let pubkey1 = Pubkey::new(&[1; 32]);
+        let ix0 = system_instruction::transfer(&pubkey0, &pubkey1, 1);
+        let secp_instruction = Instruction {
+            program_id: crate::secp256k1_program::id(),
+            accounts: vec![],
+            data: vec![],
+        };
+        let secp_instruction2 = Instruction {
+            program_id: crate::secp256k1_program::id(),
+            accounts: vec![],
+            data: vec![1],
+        };
+
+        let message = Message::new(&[ix0, secp_instruction, secp_instruction2], Some(&pubkey0));
+        assert_eq!(FeeCalculator::new(1).calculate_fee(&message), 3);
     }
 
     #[test]
