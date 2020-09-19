@@ -417,6 +417,65 @@ impl Message {
             accounts,
         })
     }
+
+    pub fn manual_serialize(&self) -> Vec<u8> {
+        let mut data =
+            Vec::with_capacity(self.instructions.len() * 8 + self.account_keys.len() * 32);
+        append_u8(&mut data, self.header.num_required_signatures);
+        append_u8(&mut data, self.header.num_readonly_signed_accounts);
+        append_u8(&mut data, self.header.num_readonly_unsigned_accounts);
+        append_u16(&mut data, self.account_keys.len() as u16);
+        for key in &self.account_keys {
+            append_slice(&mut data, key.as_ref());
+        }
+        append_slice(&mut data, self.recent_blockhash.as_ref());
+        append_u16(&mut data, self.instructions.len() as u16);
+        for instruction in &self.instructions {
+            append_u8(&mut data, instruction.program_id_index);
+            append_u16(&mut data, instruction.accounts.len() as u16);
+            append_slice(&mut data, &instruction.accounts);
+            append_u16(&mut data, instruction.data.len() as u16);
+            append_slice(&mut data, &instruction.data);
+        }
+        data
+    }
+
+    pub fn from_bytes(data: &[u8]) -> Result<Self, SanitizeError> {
+        let mut current = 0;
+        let num_required_signatures = read_u8(&mut current, &data)?;
+        let num_readonly_signed_accounts = read_u8(&mut current, &data)?;
+        let num_readonly_unsigned_accounts = read_u8(&mut current, &data)?;
+        let account_keys_len = read_u16(&mut current, &data)?;
+        let mut account_keys = Vec::with_capacity(account_keys_len as usize);
+        for _ in 0..account_keys_len {
+            account_keys.push(read_pubkey(&mut current, &data)?);
+        }
+        let recent_blockhash = Hash::new(&read_slice(&mut current, &data, 32)?);
+        let num_instructions = read_u16(&mut current, &data)?;
+        let mut instructions = Vec::with_capacity(num_instructions as usize);
+        for _ in 0..num_instructions {
+            let program_id_index = read_u8(&mut current, &data)?;
+            let accounts_len = read_u16(&mut current, &data)?;
+            let accounts = read_slice(&mut current, &data, accounts_len as usize)?;
+            let inst_data_len = read_u16(&mut current, &data)?;
+            let inst_data = read_slice(&mut current, &data, inst_data_len as usize)?;
+            instructions.push(CompiledInstruction {
+                program_id_index,
+                accounts,
+                data: inst_data,
+            });
+        }
+        Ok(Message {
+            header: MessageHeader {
+                num_required_signatures,
+                num_readonly_unsigned_accounts,
+                num_readonly_signed_accounts,
+            },
+            account_keys,
+            recent_blockhash,
+            instructions,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -660,6 +719,19 @@ mod tests {
             message.instructions[2],
             CompiledInstruction::new(2, &0, vec![0])
         );
+    }
+
+    #[test]
+    fn test_serialize() {
+        solana_logger::setup();
+        let program_id = Pubkey::default();
+        let payer = Pubkey::new_rand();
+        let id0 = Pubkey::default();
+
+        let ix = Instruction::new(program_id, &0, vec![AccountMeta::new(id0, false)]);
+        let message = Message::new(&[ix], Some(&payer));
+        let serialized = message.manual_serialize();
+        assert_eq!(message, Message::from_bytes(&serialized).unwrap());
     }
 
     #[test]
