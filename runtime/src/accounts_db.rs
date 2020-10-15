@@ -1415,6 +1415,7 @@ impl AccountsDB {
 
         let new_store = { self.recycle_stores.write().unwrap().pop() };
         if let Some(store) = new_store {
+            info!("found store: {}", store.id);
             store.recycle(slot);
             store.try_available();
             self.insert_store(slot, store.clone());
@@ -2601,6 +2602,19 @@ impl AccountsDB {
     pub(crate) fn print_accounts_stats(&self, label: &'static str) {
         self.print_index(label);
         self.print_count_and_status(label);
+        info!("recycle_stores:");
+        let recycle_stores = self.recycle_stores.read().unwrap();
+        for entry in recycle_stores.iter() {
+            info!(
+                "  slot: {} id: {} count_and_status: {:?} approx_store_count: {} len: {} capacity: {}",
+                entry.slot(),
+                entry.id,
+                *entry.count_and_status.read().unwrap(),
+                entry.approx_store_count.load(Ordering::Relaxed),
+                entry.accounts.len(),
+                entry.accounts.capacity(),
+            );
+        }
     }
 
     fn print_index(&self, label: &'static str) {
