@@ -1403,6 +1403,7 @@ impl AccountsDB {
                         if create_extra {
                             self.create_and_insert_store(slot, self.file_size);
                         }
+                        info!("search: found : {}", ret.id);
                         return ret;
                     }
                     // looked at every store, bail...
@@ -1413,15 +1414,17 @@ impl AccountsDB {
             }
         }
 
+        info!("searching len: {}", self.recycle_stores.read().unwrap().len());
         let new_store = { self.recycle_stores.write().unwrap().pop() };
         if let Some(store) = new_store {
-            info!("found store: {}", store.id);
             store.recycle(slot);
             store.try_available();
             self.insert_store(slot, store.clone());
+            info!("recycle found store: {} cap: {} len: {}", store.id, store.accounts.capacity(), store.accounts.len());
             return store;
         }
 
+        info!("creating.. {}", self.file_size);
         let store = self.create_and_insert_store(slot, self.file_size);
         store.try_available();
         store
@@ -1798,6 +1801,7 @@ impl AccountsDB {
 
                 // See if an account overflows the default append vec size.
                 let data_len = (with_meta[infos.len()].1.data.len() + 4096) as u64;
+                info!("finding for {} file_size: {}", data_len, self.file_size);
                 if data_len > self.file_size {
                     self.create_and_insert_store(slot, data_len * 2);
                 }
