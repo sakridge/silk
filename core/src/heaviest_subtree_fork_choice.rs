@@ -484,7 +484,7 @@ impl HeaviestSubtreeForkChoice {
         let best_slot = self.best_overall_slot();
         let mut best_path: VecDeque<_> = self.ancestor_iterator(best_slot).collect();
         best_path.push_front(best_slot);
-        info!(
+        debug!(
             "Latest known votes by vote pubkey: {:#?}, best path: {:?}",
             self.latest_votes,
             best_path.iter().rev().collect::<Vec<&Slot>>()

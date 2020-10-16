@@ -115,6 +115,7 @@ pub struct AppendVec {
 
 impl Drop for AppendVec {
     fn drop(&mut self) {
+        info!("append-vec dropped {:?}", self.path);
         let _ignored = remove_file(&self.path);
     }
 }

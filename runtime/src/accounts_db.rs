@@ -460,14 +460,25 @@ struct AccountsStats {
     delta_hash_num: AtomicU64,
 
     last_store_report: AtomicU64,
+    get_slot_stores: AtomicU64,
     store_hash_accounts: AtomicU64,
     store_accounts: AtomicU64,
     store_update_index: AtomicU64,
     store_handle_reclaims: AtomicU64,
     store_append_accounts: AtomicU64,
     store_find_store: AtomicU64,
+    store_shrink_append_accounts: AtomicU64,
+    store_shrink_find_store: AtomicU64,
     store_num_accounts: AtomicU64,
     store_total_data: AtomicU64,
+    store_find1: AtomicU64,
+    store_lock: AtomicU64,
+    store_find2: AtomicU64,
+    store_find3: AtomicU64,
+    store_find4: AtomicU64,
+    store_iters: AtomicU64,
+    store_recycle: AtomicU64,
+    store_create: AtomicU64,
 }
 
 fn make_min_priority_thread_pool() -> ThreadPool {
@@ -1121,6 +1132,7 @@ impl AccountsDB {
                 &hashes,
                 |_, _| shrunken_store.clone(),
                 write_versions.into_iter(),
+                true,
             );
             start.stop();
             store_accounts_elapsed = start.as_us();
@@ -1155,6 +1167,7 @@ impl AccountsDB {
             recycle_stores.extend(dead_storages);
             drop(recycle_stores);
         } else {
+            info!("full recycle stores");
             drop(recycle_stores);
             drop(dead_storages);
         }
@@ -1384,11 +1397,20 @@ impl AccountsDB {
 
     fn find_storage_candidate(&self, slot: Slot, size: usize) -> Arc<AccountStorageEntry> {
         let mut create_extra = false;
+        let mut find1 = Measure::start("find_store1");
+        let mut get_slot_stores = Measure::start("get_slot_stores");
         let slot_stores_lock = self.storage.get_slot_stores(slot);
+        get_slot_stores.stop();
+        self.stats.get_slot_stores.fetch_add(get_slot_stores.as_us(), Ordering::Relaxed);
         if let Some(slot_stores_lock) = slot_stores_lock {
+            let mut store_lock = Measure::start("store_lock");
             let slot_stores = slot_stores_lock.read().unwrap();
+            store_lock.stop();
+            self.stats
+                .store_lock
+                .fetch_add(store_lock.as_us(), Ordering::Relaxed);
             if !slot_stores.is_empty() {
-                if slot_stores.len() <= self.min_num_stores {
+                /*if slot_stores.len() <= self.min_num_stores {
                     let mut total_accounts = 0;
                     for store in slot_stores.values() {
                         total_accounts += store.count_and_status.read().unwrap().0;
@@ -1398,33 +1420,75 @@ impl AccountsDB {
                     if (total_accounts / 16) >= slot_stores.len() {
                         create_extra = true;
                     }
-                }
+                }*/
 
                 // pick an available store at random by iterating from a random point
                 let to_skip = thread_rng().gen_range(0, slot_stores.len());
 
+                let mut find4 = Measure::start("store_find4");
                 for (i, store) in slot_stores.values().cycle().skip(to_skip).enumerate() {
-                    if store.accounts.capacity() - store.accounts.len() as u64 > size as u64 && store.try_available() {
+                    let left = store.accounts.capacity() - store.accounts.len() as u64;
+                    /*if left < size as u64 {
+                        info!("not enough left on {} left: {} needed: {} status: {:?}", store.id, left, size, store.status());
+                    }*/
+                    if left > size as u64 && store.try_available() {
                         let ret = store.clone();
                         drop(slot_stores);
-                        if create_extra {
-                            self.create_and_insert_store(slot, self.file_size);
-                        }
-                        info!("search: found : {}", ret.id);
+                        /*if create_extra {
+                            let mut recycle_stores = self.recycle_stores.write().unwrap();
+                            if let Some(new_store) = recycle_stores.pop() {
+                                info!("recycling an extra store");
+                                new_store.recycle(slot);
+                                new_store.try_available();
+                                self.insert_store(slot, new_store);
+                            } else {
+                                drop(recycle_stores);
+                                info!("creating an extra store");
+                                self.stats.store_create.fetch_add(1, Ordering::Relaxed);
+                                self.create_and_insert_store(slot, self.file_size);
+                            }
+                        }*/
+                        find1.stop();
+                        find4.stop();
+                        self.stats
+                            .store_find1
+                            .fetch_add(find1.as_us(), Ordering::Relaxed);
+                        self.stats
+                            .store_find4
+                            .fetch_add(find4.as_us(), Ordering::Relaxed);
+                        self.stats
+                            .store_iters
+                            .fetch_add(i as u64, Ordering::Relaxed);
                         return ret;
                     }
                     // looked at every store, bail...
                     if i == slot_stores.len() {
+                        self.stats
+                            .store_iters
+                            .fetch_add(i as u64, Ordering::Relaxed);
+                        find4.stop();
+                        self.stats
+                            .store_find4
+                            .fetch_add(find4.as_us(), Ordering::Relaxed);
                         break;
                     }
                 }
             }
         }
+        find1.stop();
+        self.stats
+            .store_find1
+            .fetch_add(find1.as_us(), Ordering::Relaxed);
 
+        let mut find2 = Measure::start("store_find2");
+        let mut max_capacity = 0;
+        let mut recycle_len = 0;
         let new_store: Option<Arc<AccountStorageEntry>> = {
             let mut found_store = None;
             let mut recycle_stores = self.recycle_stores.write().unwrap();
+            recycle_len = recycle_stores.len();
             for (i, store) in recycle_stores.iter().enumerate() {
+                max_capacity = std::cmp::max(max_capacity, store.accounts.capacity());
                 if store.accounts.capacity() > size as u64 {
                     found_store = Some(recycle_stores.swap_remove(i));
                     break;
@@ -1446,10 +1510,23 @@ impl AccountsDB {
             self.stats.store_recycle.fetch_add(1, Ordering::Relaxed);
             return store;
         }
+        find2.stop();
+        self.stats
+            .store_find2
+            .fetch_add(find2.as_us(), Ordering::Relaxed);
 
-        info!("creating.. {}", self.file_size);
+        let mut find3 = Measure::start("store_find3");
+        info!(
+            "creating.. {} size: {} max_rec_cap: {} recycle_len: {}",
+            self.file_size, size, max_capacity, recycle_len
+        );
+        self.stats.store_create.fetch_add(1, Ordering::Relaxed);
         let store = self.create_and_insert_store(slot, self.file_size);
         store.try_available();
+        find3.stop();
+        self.stats
+            .store_find3
+            .fetch_add(find3.as_us(), Ordering::Relaxed);
         store
     }
 
@@ -1539,6 +1616,7 @@ impl AccountsDB {
             let entry = slot_entries.read().unwrap();
             for (_slot, stores) in entry.iter() {
                 if recycle_stores.len() > MAX_RECYCLE_STORES {
+                    info!("recycle_stores full");
                     break;
                 }
                 recycle_stores.push(stores.clone());
@@ -1801,6 +1879,7 @@ impl AccountsDB {
             hashes,
             storage_finder,
             write_version_producer,
+            false,
         )
     }
 
@@ -1814,6 +1893,7 @@ impl AccountsDB {
         hashes: &[Hash],
         mut storage_finder: F,
         mut write_version_producer: P,
+        is_shrink: bool,
     ) -> Vec<AccountInfo> {
         let default_account = Account::default();
         let with_meta: Vec<(StoredMeta, &Account)> = accounts
@@ -1855,6 +1935,10 @@ impl AccountsDB {
                 let data_len = (with_meta[infos.len()].1.data.len() + 4096) as u64;
                 let highest_available = self.get_highest_available_free_storage(slot);
                 if data_len > highest_available {
+                    info!(
+                        "special big data create {} highest_available: {}",
+                        data_len, highest_available
+                    );
                     self.create_and_insert_store(slot, data_len * 2);
                 }
                 continue;
@@ -1870,12 +1954,21 @@ impl AccountsDB {
             // restore the state to available
             storage.set_status(AccountStorageStatus::Available);
         }
-        self.stats
-            .store_append_accounts
-            .fetch_add(total_append_accounts_us, Ordering::Relaxed);
-        self.stats
-            .store_find_store
-            .fetch_add(total_storage_find_us, Ordering::Relaxed);
+        if is_shrink {
+            self.stats
+                .store_shrink_append_accounts
+                .fetch_add(total_append_accounts_us, Ordering::Relaxed);
+            self.stats
+                .store_shrink_find_store
+                .fetch_add(total_storage_find_us, Ordering::Relaxed);
+        } else {
+            self.stats
+                .store_append_accounts
+                .fetch_add(total_append_accounts_us, Ordering::Relaxed);
+            self.stats
+                .store_find_store
+                .fetch_add(total_storage_find_us, Ordering::Relaxed);
+        }
 
         infos
     }
@@ -2490,6 +2583,65 @@ impl AccountsDB {
                 (
                     "total_data",
                     self.stats.store_total_data.swap(0, Ordering::Relaxed),
+                    i64
+                ),
+                (
+                    "shrink_append_accounts",
+                    self.stats.store_shrink_append_accounts.swap(0, Ordering::Relaxed),
+                    i64
+                ),
+                (
+                    "shrink_find_storage",
+                    self.stats.store_shrink_find_store.swap(0, Ordering::Relaxed),
+                    i64
+                ),
+
+            );
+            datapoint_info!(
+                "accounts_db_store_timings2",
+                (
+                    "store_find1",
+                    self.stats.store_find1.swap(0, Ordering::Relaxed),
+                    i64
+                ),
+                (
+                    "store_lock",
+                    self.stats.store_lock.swap(0, Ordering::Relaxed),
+                    i64
+                ),
+                (
+                    "store_find2",
+                    self.stats.store_find2.swap(0, Ordering::Relaxed),
+                    i64
+                ),
+                (
+                    "store_find3",
+                    self.stats.store_find3.swap(0, Ordering::Relaxed),
+                    i64
+                ),
+                (
+                    "store_find4",
+                    self.stats.store_find4.swap(0, Ordering::Relaxed),
+                    i64
+                ),
+                (
+                    "store_iters",
+                    self.stats.store_iters.swap(0, Ordering::Relaxed),
+                    i64
+                ),
+                (
+                    "store_recycle",
+                    self.stats.store_recycle.swap(0, Ordering::Relaxed),
+                    i64
+                ),
+                (
+                    "store_create",
+                    self.stats.store_create.swap(0, Ordering::Relaxed),
+                    i64
+                ),
+                (
+                    "get_slot_stores",
+                    self.stats.get_slot_stores.swap(0, Ordering::Relaxed),
                     i64
                 ),
             );
