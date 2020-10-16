@@ -18,7 +18,7 @@ impl solana_sdk::abi_example::IgnoreAsHelper for SerializableAccountStorageEntry
 impl From<&AccountStorageEntry> for SerializableAccountStorageEntry {
     fn from(rhs: &AccountStorageEntry) -> Self {
         Self {
-            id: rhs.id,
+            id: rhs.append_vec_id(),
             accounts_current_len: rhs.accounts.len(),
         }
     }
