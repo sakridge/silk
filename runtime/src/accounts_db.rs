@@ -1489,7 +1489,7 @@ impl AccountsDB {
             recycle_len = recycle_stores.len();
             for (i, store) in recycle_stores.iter().enumerate() {
                 max_capacity = std::cmp::max(max_capacity, store.accounts.capacity());
-                if store.accounts.capacity() > size as u64 {
+                if Arc::strong_count(store) == 1 && store.accounts.capacity() > size as u64 {
                     found_store = Some(recycle_stores.swap_remove(i));
                     break;
                 }
