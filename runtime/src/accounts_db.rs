@@ -1928,7 +1928,7 @@ impl AccountsDB {
         calculate_cap: bool,
     ) -> (Hash, Option<u64>) {
         let mut sort_time = Measure::start("sort");
-        hashes.par_sort_by(|a, b| a.0.cmp(&b.0));
+        hashes.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
         sort_time.stop();
 
         let mut sum_time = Measure::start("cap");
@@ -2494,7 +2494,7 @@ impl AccountsDB {
 
     pub fn generate_index(&self) {
         let mut slots = self.storage.all_slots();
-        slots.sort();
+        slots.sort_unstable();
 
         let mut last_log_update = Instant::now();
         for (index, slot) in slots.iter().enumerate() {
@@ -2588,7 +2588,7 @@ impl AccountsDB {
 
     fn print_index(&self, label: &'static str) {
         let mut roots: Vec<_> = self.accounts_index.all_roots();
-        roots.sort();
+        roots.sort_unstable();
         info!("{}: accounts_index roots: {:?}", label, roots,);
         for (pubkey, account_entry) in self.accounts_index.account_maps.read().unwrap().iter() {
             info!("  key: {}", pubkey);
@@ -2601,13 +2601,13 @@ impl AccountsDB {
 
     fn print_count_and_status(&self, label: &'static str) {
         let mut slots: Vec<_> = self.storage.all_slots();
-        slots.sort();
+        slots.sort_unstable();
         info!("{}: count_and status for {} slots:", label, slots.len());
         for slot in &slots {
             let slot_stores = self.storage.get_slot_stores(*slot).unwrap();
             let r_slot_stores = slot_stores.read().unwrap();
             let mut ids: Vec<_> = r_slot_stores.keys().cloned().collect();
-            ids.sort();
+            ids.sort_unstable();
             for id in &ids {
                 let entry = r_slot_stores.get(id).unwrap();
                 info!(
@@ -4814,14 +4814,14 @@ pub mod tests {
 
         accounts.reset_uncleaned_roots();
         let mut actual_slots = accounts.shrink_candidate_slots.lock().unwrap().clone();
-        actual_slots.sort();
+        actual_slots.sort_unstable();
         assert_eq!(actual_slots, vec![0, 1, 2]);
 
         accounts.accounts_index.clear_roots();
         let mut actual_slots = (0..5)
             .map(|_| accounts.next_shrink_slot())
             .collect::<Vec<_>>();
-        actual_slots.sort();
+        actual_slots.sort_unstable();
         assert_eq!(actual_slots, vec![None, None, Some(0), Some(1), Some(2)],);
     }
 
@@ -5007,7 +5007,7 @@ pub mod tests {
         store_counts.insert(3, (1, HashSet::from_iter(vec![key2])));
         AccountsDB::calc_delete_dependencies(&purges, &mut store_counts);
         let mut stores: Vec<_> = store_counts.keys().cloned().collect();
-        stores.sort();
+        stores.sort_unstable();
         for store in &stores {
             info!(
                 "store: {:?} : {:?}",
