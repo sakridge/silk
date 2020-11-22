@@ -23,19 +23,16 @@ $(eval echo "$@")"
   fi
 
   (
-    set +e
     execution_step "Collecting Logfiles from Nodes"
     collect_logs
   )
 
   (
-    set +e
     execution_step "Stop Network Software"
     "${REPO_ROOT}"/net/net.sh stop
   )
 
   (
-    set +e
     analyze_packet_loss
   )
 
