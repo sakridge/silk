@@ -2182,8 +2182,8 @@ impl Bank {
                     let hash_age = hash_queue.check_hash_age(&message.recent_blockhash, max_age);
                     if hash_age == Some(true) {
                         (Ok(()), Some(HashAgeKind::Extant))
-                    } else if let Some((pubkey, acc)) = self.check_tx_durable_nonce(&tx) {
-                        (Ok(()), Some(HashAgeKind::DurableNonce(pubkey, acc)))
+                    } else if let Some((_pubkey, _acc)) = self.check_tx_durable_nonce(&tx) {
+                        (Err(TransactionError::BlockhashNotFound), None)
                     } else if hash_age == Some(false) {
                         error_counters.blockhash_too_old += 1;
                         (Err(TransactionError::BlockhashNotFound), None)
@@ -8490,6 +8490,7 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_durable_nonce_transaction() {
         let (mut bank, _mint_keypair, custodian_keypair, nonce_keypair) =
             setup_nonce_with_bank(10_000_000, |_| {}, 5_000_000, 250_000, None).unwrap();
@@ -8599,6 +8600,7 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_nonce_fee_calculator_updates() {
         let (mut genesis_config, mint_keypair) = create_genesis_config(1_000_000);
         genesis_config.rent.lamports_per_byte_year = 0;
