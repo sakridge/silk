@@ -300,6 +300,8 @@ pub struct ClusterInfo {
     socket: UdpSocket,
     local_message_pending_push_queue: RwLock<Vec<(CrdsValue, u64)>>,
     contact_debug_interval: u64,
+    bank_forks: RwLock<Option<Arc<RwLock<BankForks>>>>,
+    pull_requests_disabled: AtomicBool,
 }
 
 impl Default for ClusterInfo {
@@ -556,6 +558,8 @@ impl ClusterInfo {
             socket: UdpSocket::bind("0.0.0.0:0").unwrap(),
             local_message_pending_push_queue: RwLock::new(vec![]),
             contact_debug_interval: DEFAULT_CONTACT_DEBUG_INTERVAL,
+            bank_forks: RwLock::new(None),
+            pull_requests_disabled: AtomicBool::new(false),
         };
         {
             let mut gossip = me.gossip.write().unwrap();
@@ -590,11 +594,26 @@ impl ClusterInfo {
                     .clone(),
             ),
             contact_debug_interval: self.contact_debug_interval,
+            bank_forks: RwLock::new(None),
+            pull_requests_disabled: AtomicBool::new(false),
         }
+    }
+
+    pub fn enable_pull_requests(&self) {
+        self.pull_requests_disabled.store(false, Ordering::Relaxed);
+    }
+
+    pub fn disable_pull_requests(&self) {
+        self.pull_requests_disabled.store(true, Ordering::Relaxed);
     }
 
     pub fn set_contact_debug_interval(&mut self, new: u64) {
         self.contact_debug_interval = new;
+    }
+
+    pub fn set_bank_forks(&self, bank_forks: Arc<RwLock<BankForks>>) {
+        let mut forks = self.bank_forks.write().unwrap();
+        *forks = Some(bank_forks);
     }
 
     pub fn update_contact_info<F>(&self, modify: F)
@@ -1590,6 +1609,9 @@ impl ClusterInfo {
         gossip_validators: Option<&HashSet<Pubkey>>,
         stakes: &HashMap<Pubkey, u64>,
     ) -> Vec<(SocketAddr, Protocol)> {
+        if self.pull_requests_disabled.load(Ordering::Relaxed) {
+            return vec![];
+        }
         let now = timestamp();
         let mut pulls: Vec<_> = {
             let r_gossip =
@@ -1748,14 +1770,10 @@ impl ClusterInfo {
         }
     }
 
-    fn handle_purge(
-        self: &Arc<Self>,
-        thread_pool: &ThreadPool,
-        bank_forks: &Option<Arc<RwLock<BankForks>>>,
-        stakes: &HashMap<Pubkey, u64>,
-    ) {
+    fn handle_purge(self: &Arc<Self>, thread_pool: &ThreadPool, stakes: &HashMap<Pubkey, u64>) {
         let timeout = {
-            if let Some(ref bank_forks) = bank_forks {
+            let bank_forks = self.bank_forks.read().unwrap();
+            if let Some(ref bank_forks) = *bank_forks {
                 let bank = bank_forks.read().unwrap().working_bank();
                 let epoch = bank.epoch();
                 let epoch_schedule = bank.epoch_schedule();
@@ -1775,7 +1793,6 @@ impl ClusterInfo {
     /// randomly pick a node and ask them for updates asynchronously
     pub fn gossip(
         self: Arc<Self>,
-        bank_forks: Option<Arc<RwLock<BankForks>>>,
         sender: PacketSender,
         gossip_validators: Option<HashSet<Pubkey>>,
         exit: &Arc<AtomicBool>,
@@ -1812,11 +1829,14 @@ impl ClusterInfo {
                         last_contact_info_trace = start;
                     }
 
-                    let stakes: HashMap<_, _> = match bank_forks {
-                        Some(ref bank_forks) => {
-                            staking_utils::staked_nodes(&bank_forks.read().unwrap().working_bank())
+                    let stakes: HashMap<_, _> = {
+                        let bank_forks = self.bank_forks.read().unwrap();
+                        match *bank_forks {
+                            Some(ref bank_forks) => staking_utils::staked_nodes(
+                                &bank_forks.read().unwrap().working_bank(),
+                            ),
+                            None => HashMap::new(),
                         }
-                        None => HashMap::new(),
                     };
 
                     let _ = self.run_gossip(
@@ -1831,7 +1851,7 @@ impl ClusterInfo {
                         return;
                     }
 
-                    self.handle_purge(&thread_pool, &bank_forks, &stakes);
+                    self.handle_purge(&thread_pool, &stakes);
 
                     self.handle_adopt_shred_version(&mut adopt_shred_version);
 
@@ -2463,7 +2483,7 @@ impl ClusterInfo {
     }
 
     fn get_stakes_and_epoch_time(
-        bank_forks: Option<&Arc<RwLock<BankForks>>>,
+        bank_forks: Option<Arc<RwLock<BankForks>>>,
     ) -> (HashMap<Pubkey, u64>, u64) {
         let epoch_time_ms;
         let stakes: HashMap<_, _> = match bank_forks {
@@ -2554,7 +2574,6 @@ impl ClusterInfo {
     fn run_listen(
         &self,
         recycler: &PacketsRecycler,
-        bank_forks: Option<&Arc<RwLock<BankForks>>>,
         requests_receiver: &PacketReceiver,
         response_sender: &PacketSender,
         thread_pool: &ThreadPool,
@@ -2573,19 +2592,24 @@ impl ClusterInfo {
                     .add_relaxed(excess_count as u64);
             }
         }
-        let (stakes, epoch_time_ms) = Self::get_stakes_and_epoch_time(bank_forks);
-        // Using root_bank instead of working_bank here so that an enbaled
-        // feature does not roll back (if the feature happens to get enabled in
-        // a minority fork).
-        let feature_set = bank_forks.map(|bank_forks| {
-            bank_forks
-                .read()
-                .unwrap()
-                .root_bank()
-                .deref()
-                .feature_set
-                .clone()
-        });
+        let (stakes, epoch_time_ms, feature_set) = {
+            let bank_forks = self.bank_forks.read().unwrap();
+            let (stakes, epoch_time_ms) = Self::get_stakes_and_epoch_time(bank_forks.clone());
+
+            // Using root_bank instead of working_bank here so that an enbaled
+            // feature does not roll back (if the feature happens to get enabled in
+            // a minority fork).
+            let feature_set = bank_forks.as_ref().map(|bank_forks| {
+                bank_forks
+                    .read()
+                    .unwrap()
+                    .root_bank()
+                    .deref()
+                    .feature_set
+                    .clone()
+            });
+            (stakes, epoch_time_ms, feature_set)
+        };
         self.process_packets(
             packets,
             thread_pool,
@@ -2843,7 +2867,6 @@ impl ClusterInfo {
 
     pub fn listen(
         self: Arc<Self>,
-        bank_forks: Option<Arc<RwLock<BankForks>>>,
         requests_receiver: PacketReceiver,
         response_sender: PacketSender,
         exit: &Arc<AtomicBool>,
@@ -2862,7 +2885,6 @@ impl ClusterInfo {
                 loop {
                     let e = self.run_listen(
                         &recycler,
-                        bank_forks.as_ref(),
                         &requests_receiver,
                         &response_sender,
                         &thread_pool,

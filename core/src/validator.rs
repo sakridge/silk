@@ -68,7 +68,7 @@ use solana_vote_program::vote_state::VoteState;
 use std::time::Instant;
 use std::{
     collections::HashSet,
-    net::{SocketAddr, TcpListener, UdpSocket},
+    net::{SocketAddr, TcpListener},
     path::{Path, PathBuf},
     process,
     sync::atomic::{AtomicBool, Ordering},
@@ -256,6 +256,8 @@ impl Validator {
         sigverify::init();
         info!("Done.");
 
+        Self::print_node_info(&node);
+
         if !ledger_path.is_dir() {
             error!(
                 "ledger directory does not exist or is not accessible: {:?}",
@@ -264,9 +266,38 @@ impl Validator {
             process::exit(1);
         }
 
+        let mut validator_exit = ValidatorExit::default();
+        let exit = Arc::new(AtomicBool::new(false));
+        let exit_ = exit.clone();
+        validator_exit.register_exit(Box::new(move || exit_.store(true, Ordering::Relaxed)));
+        let validator_exit = Arc::new(RwLock::new(Some(validator_exit)));
+
+        if let Some(ref cluster_entrypoint) = cluster_entrypoint {
+            if !config.no_port_check {
+                verify_reachable_ports(&node, cluster_entrypoint, &config);
+            }
+        }
+
+        let mut cluster_info = ClusterInfo::new(node.info.clone(), identity_keypair.clone());
+        cluster_info.set_contact_debug_interval(config.contact_debug_interval);
+        let cluster_info = Arc::new(cluster_info);
+
+        let gossip_service = GossipService::new(
+            &cluster_info,
+            node.sockets.gossip,
+            config.gossip_validators.clone(),
+            &exit,
+        );
+
+        // Insert the entrypoint info, should only be None if this node
+        // is the bootstrap validator
+        if let Some(cluster_entrypoint) = cluster_entrypoint {
+            cluster_info.set_entrypoint(cluster_entrypoint.clone());
+        }
+
         if let Some(ref cluster_entrypoint) = cluster_entrypoint {
             rpc_bootstrap(
-                &node,
+                &cluster_info,
                 &identity_keypair,
                 &ledger_path,
                 &vote_account,
@@ -274,7 +305,6 @@ impl Validator {
                 cluster_entrypoint,
                 &config,
                 &config.rpc_bootstrap_config,
-                config.no_port_check,
                 config.use_progress_bar,
                 config.maximum_local_snapshot_age,
             );
@@ -297,12 +327,6 @@ impl Validator {
         }
         start.stop();
         info!("done. {}", start);
-
-        let mut validator_exit = ValidatorExit::default();
-        let exit = Arc::new(AtomicBool::new(false));
-        let exit_ = exit.clone();
-        validator_exit.register_exit(Box::new(move || exit_.store(true, Ordering::Relaxed)));
-        let validator_exit = Arc::new(RwLock::new(Some(validator_exit)));
 
         let (replay_vote_sender, replay_vote_receiver) = unbounded();
         let (
@@ -334,6 +358,7 @@ impl Validator {
         let leader_schedule_cache = Arc::new(leader_schedule_cache);
         let bank = bank_forks.working_bank();
         let bank_forks = Arc::new(RwLock::new(bank_forks));
+        cluster_info.set_bank_forks(bank_forks.clone());
 
         let sample_performance_service =
             if config.rpc_addrs.is_some() && config.rpc_config.enable_rpc_transaction_history {
@@ -360,8 +385,6 @@ impl Validator {
             Some(&bank.hard_forks().read().unwrap()),
         );
 
-        Self::print_node_info(&node);
-
         if let Some(expected_shred_version) = config.expected_shred_version {
             if expected_shred_version != node.info.shred_version {
                 error!(
@@ -372,9 +395,6 @@ impl Validator {
             }
         }
 
-        let mut cluster_info = ClusterInfo::new(node.info.clone(), identity_keypair.clone());
-        cluster_info.set_contact_debug_interval(config.contact_debug_interval);
-        let cluster_info = Arc::new(cluster_info);
         let mut block_commitment_cache = BlockCommitmentCache::default();
         block_commitment_cache.initialize_slots(bank.slot());
         let block_commitment_cache = Arc::new(RwLock::new(block_commitment_cache));
@@ -505,14 +525,6 @@ impl Validator {
 
         let ip_echo_server = solana_net_utils::ip_echo_server(node.sockets.ip_echo.unwrap());
 
-        let gossip_service = GossipService::new(
-            &cluster_info,
-            Some(bank_forks.clone()),
-            node.sockets.gossip,
-            config.gossip_validators.clone(),
-            &exit,
-        );
-
         let serve_repair = Arc::new(RwLock::new(ServeRepair::new(cluster_info.clone())));
         let serve_repair_service = ServeRepairService::new(
             &serve_repair,
@@ -520,12 +532,6 @@ impl Validator {
             node.sockets.serve_repair,
             &exit,
         );
-
-        // Insert the entrypoint info, should only be None if this node
-        // is the bootstrap validator
-        if let Some(cluster_entrypoint) = cluster_entrypoint {
-            cluster_info.set_entrypoint(cluster_entrypoint.clone());
-        }
 
         let (snapshot_packager_service, snapshot_config_and_package_sender) =
             if let Some(snapshot_config) = config.snapshot_config.clone() {
@@ -1014,36 +1020,6 @@ fn get_rpc_node(
     }
 }
 
-fn start_gossip_node(
-    identity_keypair: &Arc<Keypair>,
-    entrypoint_gossip: &SocketAddr,
-    gossip_addr: &SocketAddr,
-    gossip_socket: UdpSocket,
-    expected_shred_version: Option<u16>,
-    gossip_validators: Option<HashSet<Pubkey>>,
-) -> (Arc<ClusterInfo>, Arc<AtomicBool>, GossipService) {
-    let cluster_info = ClusterInfo::new(
-        ClusterInfo::gossip_contact_info(
-            &identity_keypair.pubkey(),
-            *gossip_addr,
-            expected_shred_version.unwrap_or(0),
-        ),
-        identity_keypair.clone(),
-    );
-    cluster_info.set_entrypoint(ContactInfo::new_gossip_entry_point(entrypoint_gossip));
-    let cluster_info = Arc::new(cluster_info);
-
-    let gossip_exit_flag = Arc::new(AtomicBool::new(false));
-    let gossip_service = GossipService::new(
-        &cluster_info,
-        None,
-        gossip_socket,
-        gossip_validators,
-        &gossip_exit_flag,
-    );
-    (cluster_info, gossip_exit_flag, gossip_service)
-}
-
 fn verify_reachable_ports(
     node: &Node,
     cluster_entrypoint: &ContactInfo,
@@ -1128,7 +1104,7 @@ impl Default for RpcBootstrapConfig {
 
 #[allow(clippy::too_many_arguments)]
 fn rpc_bootstrap(
-    node: &Node,
+    cluster_info: &Arc<ClusterInfo>,
     identity_keypair: &Arc<Keypair>,
     ledger_path: &Path,
     vote_account: &Pubkey,
@@ -1136,34 +1112,17 @@ fn rpc_bootstrap(
     cluster_entrypoint: &ContactInfo,
     validator_config: &ValidatorConfig,
     bootstrap_config: &RpcBootstrapConfig,
-    no_port_check: bool,
     use_progress_bar: bool,
     maximum_local_snapshot_age: Slot,
 ) {
-    if !no_port_check {
-        verify_reachable_ports(&node, cluster_entrypoint, &validator_config);
-    }
-
     if bootstrap_config.no_genesis_fetch && bootstrap_config.no_snapshot_fetch {
         return;
     }
 
     let mut blacklisted_rpc_nodes = HashSet::new();
-    let mut gossip = None;
     loop {
-        if gossip.is_none() {
-            gossip = Some(start_gossip_node(
-                &identity_keypair,
-                &cluster_entrypoint.gossip,
-                &node.info.gossip,
-                node.sockets.gossip.try_clone().unwrap(),
-                validator_config.expected_shred_version,
-                validator_config.gossip_validators.clone(),
-            ));
-        }
-
         let rpc_node_details = get_rpc_node(
-            &gossip.as_ref().unwrap().0,
+            cluster_info,
             &cluster_entrypoint.gossip,
             &validator_config,
             &mut blacklisted_rpc_nodes,
@@ -1243,16 +1202,14 @@ fn rpc_bootstrap(
                         .map_err(|err| format!("Failed to get RPC node slot: {}", err))
                         .and_then(|slot| {
                             info!("RPC node root slot: {}", slot);
-                            let (_cluster_info, gossip_exit_flag, gossip_service) =
-                                gossip.take().unwrap();
-                            gossip_exit_flag.store(true, Ordering::Relaxed);
+                            cluster_info.disable_pull_requests();
                             let ret = download_snapshot(
                                 &rpc_contact_info.rpc,
                                 &ledger_path,
                                 snapshot_hash,
                                 use_progress_bar,
                             );
-                            gossip_service.join().unwrap();
+                            cluster_info.enable_pull_requests();
                             ret
                         })
                 }
@@ -1300,10 +1257,6 @@ fn rpc_bootstrap(
             rpc_contact_info.id
         );
         blacklisted_rpc_nodes.insert(rpc_contact_info.id);
-    }
-    if let Some((_cluster_info, gossip_exit_flag, gossip_service)) = gossip.take() {
-        gossip_exit_flag.store(true, Ordering::Relaxed);
-        gossip_service.join().unwrap();
     }
 }
 
