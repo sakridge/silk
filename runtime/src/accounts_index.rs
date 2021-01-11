@@ -7,9 +7,11 @@ use solana_sdk::{
     clock::Slot,
     pubkey::{Pubkey, PUBKEY_BYTES},
 };
+use dashmap::DashMap;
 use std::{
     collections::{
-        btree_map::{self, BTreeMap},
+        btree_map::{BTreeMap},
+        BTreeSet,
         HashMap, HashSet,
     },
     ops::{
@@ -30,7 +32,7 @@ pub type SlotSlice<'s, T> = &'s [(Slot, T)];
 pub type Ancestors = HashMap<Slot, usize>;
 
 pub type RefCount = u64;
-pub type AccountMap<K, V> = BTreeMap<K, V>;
+pub type AccountMap<K, V> = DashMap<K, V>;
 
 type AccountMapEntry<T> = Arc<AccountMapEntryInner<T>>;
 
@@ -147,7 +149,8 @@ pub struct RootsTracker {
 }
 
 pub struct AccountsIndexIterator<'a, T> {
-    account_maps: &'a RwLock<AccountMap<Pubkey, AccountMapEntry<T>>>,
+    account_maps: &'a AccountMap<Pubkey, AccountMapEntry<T>>,
+    account_keys: &'a RwLock<BTreeSet<Pubkey>>,
     start_bound: Bound<Pubkey>,
     end_bound: Bound<Pubkey>,
     is_finished: bool,
@@ -163,7 +166,8 @@ impl<'a, T> AccountsIndexIterator<'a, T> {
     }
 
     pub fn new<R>(
-        account_maps: &'a RwLock<AccountMap<Pubkey, AccountMapEntry<T>>>,
+        account_maps: &'a AccountMap<Pubkey, AccountMapEntry<T>>,
+        account_keys: &'a RwLock<BTreeSet<Pubkey>>,
         range: Option<R>,
     ) -> Self
     where
@@ -179,6 +183,7 @@ impl<'a, T> AccountsIndexIterator<'a, T> {
                 .map(|r| Self::clone_bound(r.end_bound()))
                 .unwrap_or(Unbounded),
             account_maps,
+            account_keys,
             is_finished: false,
         }
     }
@@ -192,11 +197,14 @@ impl<'a, T: 'static + Clone> Iterator for AccountsIndexIterator<'a, T> {
         }
 
         let chunk: Vec<(Pubkey, AccountMapEntry<T>)> = self
-            .account_maps
+            .account_keys
             .read()
             .unwrap()
             .range((self.start_bound, self.end_bound))
-            .map(|(pubkey, account_map_entry)| (*pubkey, account_map_entry.clone()))
+            .map(|pubkey| {
+                let account_map_entry = self.account_maps.get(pubkey).unwrap().value().clone();
+                (*pubkey, account_map_entry)
+            })
             .take(ITER_BATCH_SIZE)
             .collect();
 
@@ -212,10 +220,18 @@ impl<'a, T: 'static + Clone> Iterator for AccountsIndexIterator<'a, T> {
 
 #[derive(Debug, Default)]
 pub struct AccountsIndex<T> {
-    pub account_maps: RwLock<AccountMap<Pubkey, AccountMapEntry<T>>>,
+    // Pubkey -> Store location
+    pub account_maps: AccountMap<Pubkey, AccountMapEntry<T>>,
+
+    // Ordered view of the account keys for collecting rent.
+    pub account_keys: RwLock<BTreeSet<Pubkey>>,
+
+    // Token scan Indexes
     program_id_index: SecondaryIndex<DashMapSecondaryIndexEntry>,
     spl_token_mint_index: SecondaryIndex<DashMapSecondaryIndexEntry>,
     spl_token_owner_index: SecondaryIndex<RwLockSecondaryIndexEntry>,
+
+    // Roots
     roots_tracker: RwLock<RootsTracker>,
     ongoing_scan_roots: RwLock<BTreeMap<Slot, u64>>,
 }
@@ -225,7 +241,7 @@ impl<T: 'static + Clone> AccountsIndex<T> {
     where
         R: RangeBounds<Pubkey>,
     {
-        AccountsIndexIterator::new(&self.account_maps, range)
+        AccountsIndexIterator::new(&self.account_maps, &self.account_keys, range)
     }
 
     fn do_checked_scan_accounts<F, R>(
@@ -472,21 +488,15 @@ impl<T: 'static + Clone> AccountsIndex<T> {
     }
 
     pub fn get_account_read_entry(&self, pubkey: &Pubkey) -> Option<ReadAccountMapEntry<T>> {
-        self.account_maps
-            .read()
-            .unwrap()
-            .get(pubkey)
-            .cloned()
-            .map(ReadAccountMapEntry::from_account_map_entry)
+        let v = self.account_maps
+            .get(pubkey)?;
+        Some(ReadAccountMapEntry::from_account_map_entry(v.value().clone()))
     }
 
     fn get_account_write_entry(&self, pubkey: &Pubkey) -> Option<WriteAccountMapEntry<T>> {
-        self.account_maps
-            .read()
-            .unwrap()
-            .get(pubkey)
-            .cloned()
-            .map(WriteAccountMapEntry::from_account_map_entry)
+        let v = self.account_maps
+            .get(pubkey)?;
+        Some(WriteAccountMapEntry::from_account_map_entry(v.value().clone()))
     }
 
     fn get_account_write_entry_else_create(
@@ -500,8 +510,8 @@ impl<T: 'static + Clone> AccountsIndex<T> {
                 ref_count: AtomicU64::new(0),
                 slot_list: RwLock::new(SlotList::with_capacity(1)),
             });
-            let mut w_account_maps = self.account_maps.write().unwrap();
-            let account_entry = w_account_maps.entry(*pubkey).or_insert_with(|| {
+            //let mut w_account_maps = self.account_maps.write().unwrap();
+            let account_entry = self.account_maps.entry(*pubkey).or_insert_with(|| {
                 is_newly_inserted = true;
                 new_entry
             });
@@ -516,10 +526,11 @@ impl<T: 'static + Clone> AccountsIndex<T> {
     pub fn handle_dead_keys(&self, dead_keys: &[Pubkey], account_indexes: &HashSet<AccountIndex>) {
         if !dead_keys.is_empty() {
             for key in dead_keys.iter() {
-                let mut w_index = self.account_maps.write().unwrap();
-                if let btree_map::Entry::Occupied(index_entry) = w_index.entry(*key) {
+                //let mut w_index = self.account_maps.write().unwrap();
+                if let dashmap::mapref::entry::Entry::Occupied(index_entry) = self.account_maps.entry(*key) {
                     if index_entry.get().slot_list.read().unwrap().is_empty() {
                         index_entry.remove();
+                        self.account_keys.write().unwrap().remove(key);
 
                         // Note passing `None` to remove all the entries for this key
                         // is only safe because we have the lock for this key's entry
@@ -807,6 +818,7 @@ impl<T: 'static + Clone> AccountsIndex<T> {
         }
     }
 
+    // Keeps only the newest rooted entry for a given pubkey
     fn purge_older_root_entries(
         &self,
         pubkey: &Pubkey,
@@ -815,8 +827,13 @@ impl<T: 'static + Clone> AccountsIndex<T> {
         max_clean_root: Option<Slot>,
         account_indexes: &HashSet<AccountIndex>,
     ) {
-        let roots_traker = &self.roots_tracker.read().unwrap();
-        let max_root = Self::get_max_root(&roots_traker.roots, &list, max_clean_root);
+        if list.len() <= 1 {
+            return;
+        }
+        let max_root = {
+            let roots_tracker = &self.roots_tracker.read().unwrap();
+            Self::get_max_root(&roots_tracker.roots, &list, max_clean_root)
+        };
 
         let mut purged_slots: HashSet<Slot> = HashSet::new();
         list.retain(|(slot, value)| {

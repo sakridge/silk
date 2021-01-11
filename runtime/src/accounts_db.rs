@@ -793,10 +793,10 @@ impl AccountsDB {
         let mut accounts_scan = Measure::start("accounts_scan");
         let pubkeys: Vec<Pubkey> = self
             .accounts_index
-            .account_maps
+            .account_keys
             .read()
             .unwrap()
-            .keys()
+            .iter()
             .cloned()
             .collect();
         // parallel scan the index.
@@ -2368,10 +2368,10 @@ impl AccountsDB {
         let mut scan = Measure::start("scan");
         let keys: Vec<_> = self
             .accounts_index
-            .account_maps
+            .account_keys
             .read()
             .unwrap()
-            .keys()
+            .iter()
             .cloned()
             .collect();
         let mismatch_found = AtomicU64::new(0);
@@ -3054,7 +3054,8 @@ impl AccountsDB {
         }
 
         let mut counts = HashMap::new();
-        for account_entry in self.accounts_index.account_maps.read().unwrap().values() {
+        for index_entry in self.accounts_index.account_maps.iter() {
+            let account_entry = index_entry.value();
             for (_slot, account_entry) in account_entry.slot_list.read().unwrap().iter() {
                 *counts.entry(account_entry.store_id).or_insert(0) += 1;
             }
@@ -3103,7 +3104,9 @@ impl AccountsDB {
         #[allow(clippy::stable_sort_primitive)]
         roots.sort();
         info!("{}: accounts_index roots: {:?}", label, roots,);
-        for (pubkey, account_entry) in self.accounts_index.account_maps.read().unwrap().iter() {
+        for index_entry in self.accounts_index.account_maps.iter() {
+            let pubkey = index_entry.key();
+            let account_entry = index_entry.value();
             info!("  key: {}", pubkey);
             info!(
                 "      slots: {:?}",
