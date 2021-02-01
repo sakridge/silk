@@ -491,6 +491,24 @@ impl AccountStorageEntry {
         }
     }
 
+    pub fn accounts(&self, offset: usize) -> Vec<StoredAccountMeta> {
+        // Need to check the count, since the append_vec may not
+        // be reset to allow for snapshot hash calculations.
+        // For cleanup though, it should not count these accounts again
+        // or the ref counting may be incorrect.
+        if self.count() > 0 {
+            self.accounts.accounts(offset)
+        } else {
+            vec![]
+        }
+    }
+
+    // Background hashing calculations can use the raw accounts all the accounts
+    // are cleaned up.
+    pub fn raw_accounts(&self, offset: usize) -> Vec<StoredAccountMeta> {
+        self.accounts.accounts(offset)
+    }
+
     fn remove_account(&self, num_bytes: usize, reset_accounts: bool) -> usize {
         let mut count_and_status = self.count_and_status.write().unwrap();
         let (mut count, mut status) = *count_and_status;
@@ -2366,7 +2384,7 @@ impl AccountsDB {
             self.thread_pool.install(|| {
                 storage_maps
                     .par_iter()
-                    .flat_map(|storage| storage.accounts.accounts(0))
+                    .flat_map(|storage| storage.accounts(0))
                     .for_each(|account| storage_scan_func(&retval, LoadedAccount::Stored(account)));
             });
 
@@ -4152,7 +4170,7 @@ impl AccountsDB {
                 stores
                     .into_par_iter()
                     .map(|store| {
-                        let accounts = store.accounts.accounts(0);
+                        let accounts = store.accounts(0);
                         accounts
                             .into_iter()
                             .map(|account| (store.slot(), account.meta.pubkey))
@@ -4529,7 +4547,7 @@ impl AccountsDB {
                 .sum();
             let mut accounts_map: AccountsMap = AccountsMap::with_capacity(num_accounts);
             storage_maps.iter().for_each(|storage| {
-                let accounts = storage.accounts.accounts(0);
+                let accounts = storage.accounts(0);
                 accounts.into_iter().for_each(|stored_account| {
                     let entry = accounts_map
                         .entry(stored_account.meta.pubkey)
@@ -5161,10 +5179,7 @@ pub mod tests {
                 .values()
                 .map(|s| s.approx_stored_count())
                 .sum(),
-            r_slot_storages
-                .values()
-                .map(|s| s.accounts.accounts(0).len())
-                .sum(),
+            r_slot_storages.values().map(|s| s.accounts(0).len()).sum(),
         );
         assert_eq!(expected_store_count, actual_store_count);
         total_count == count
@@ -5385,7 +5400,7 @@ pub mod tests {
                 let r_slot_storage = slot_storage.read().unwrap();
                 let count = r_slot_storage
                     .values()
-                    .map(|store| store.accounts.accounts(0).len())
+                    .map(|store| store.accounts(0).len())
                     .sum();
                 let stored_count: usize = r_slot_storage
                     .values()
