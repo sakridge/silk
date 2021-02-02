@@ -496,11 +496,11 @@ impl AccountStorageEntry {
         // be reset to allow for snapshot hash calculations.
         // For cleanup though, it should not count these accounts again
         // or the ref counting may be incorrect.
-        if self.count() > 0 {
-            self.accounts.accounts(offset)
-        } else {
-            vec![]
-        }
+        //if self.count() > 0 {
+        self.accounts.accounts(offset)
+        //} else {
+        //vec![]
+        //}
     }
 
     // Background hashing calculations can use the raw accounts all the accounts
@@ -513,7 +513,9 @@ impl AccountStorageEntry {
         let mut count_and_status = self.count_and_status.write().unwrap();
         let (mut count, mut status) = *count_and_status;
 
-        if count == 1 && status == AccountStorageStatus::Full && reset_accounts {
+        //if count == 1 && status == AccountStorageStatus::Full && reset_accounts {
+        if count == 1 && status == AccountStorageStatus::Full {
+            info!("reset {}", self.append_vec_id());
             // this case arises when we remove the last account from the
             //  storage, but we've learned from previous write attempts that
             //  the storage is full
@@ -540,6 +542,12 @@ impl AccountStorageEntry {
 
         self.alive_bytes.fetch_sub(num_bytes, Ordering::SeqCst);
         count -= 1;
+        info!(
+            "remove_account: id: {} count: {} status: {:?}",
+            self.append_vec_id(),
+            count,
+            status
+        );
         *count_and_status = (count, status);
         count
     }
@@ -628,6 +636,8 @@ pub struct AccountsDB {
     /// distribute the accounts across storage lists
     pub next_id: AtomicUsize,
     pub shrink_candidate_slots: Mutex<ShrinkCandidates>,
+
+    /// Legacy shrink slots used for when caching is disabled.
     pub shrink_candidate_slots_v1: Mutex<Vec<Slot>>,
 
     pub(crate) write_version: AtomicU64,
@@ -1081,6 +1091,7 @@ impl AccountsDB {
     pub fn new_sized(paths: Vec<PathBuf>, file_size: u64) -> Self {
         AccountsDB {
             file_size,
+            min_num_stores: 0,
             ..AccountsDB::new(paths, &ClusterType::Development)
         }
     }
@@ -1150,7 +1161,7 @@ impl AccountsDB {
         let mut already_counted = HashSet::new();
         for (pubkey, (account_infos, ref_count_from_storage)) in purges.iter() {
             let no_delete = if account_infos.len() as u64 != *ref_count_from_storage {
-                debug!(
+                info!(
                     "calc_delete_dependencies(),
                     pubkey: {},
                     account_infos: {:?},
@@ -1165,7 +1176,7 @@ impl AccountsDB {
             } else {
                 let mut no_delete = false;
                 for (_slot, account_info) in account_infos {
-                    debug!(
+                    info!(
                         "calc_delete_dependencies()
                         storage id: {},
                         count len: {}",
@@ -1340,6 +1351,7 @@ impl AccountsDB {
 
         let mut key_timings = CleanKeyTimings::default();
         let pubkeys = self.construct_candidate_clean_keys(max_clean_root, &mut key_timings);
+        info!("clean: {:?}", pubkeys);
 
         let total_keys_count = pubkeys.len();
         let mut accounts_scan = Measure::start("accounts_scan");
@@ -1470,10 +1482,14 @@ impl AccountsDB {
             });
         }
         store_counts_time.stop();
+        info!("purges: {:?}", purges);
+        info!("store_counts: {:?}", store_counts);
 
         let mut calc_deps_time = Measure::start("calc_deps");
         Self::calc_delete_dependencies(&purges, &mut store_counts);
         calc_deps_time.stop();
+
+        info!("store_counts2: {:?}", store_counts);
 
         // Only keep purges where the entire history of the account in the root set
         // can be purged. All AppendVecs for those updates are dead.
@@ -1487,6 +1503,7 @@ impl AccountsDB {
             true
         });
         purge_filter.stop();
+        info!("purges2: {:?}", purges);
 
         let mut reclaims_time = Measure::start("reclaims");
         // Recalculate reclaims with new purge set
@@ -1565,6 +1582,7 @@ impl AccountsDB {
         if reclaims.is_empty() {
             return;
         }
+        info!("handle_reclaims: {:?}", reclaims);
         let (purged_account_slots, reclaimed_offsets) =
             if let Some((ref mut x, ref mut y)) = reclaim_result {
                 (Some(x), Some(y))
@@ -3617,7 +3635,7 @@ impl AccountsDB {
                 oldest_slot = *slot;
             }
         }
-        info!("total_stores: {}, newest_slot: {}, oldest_slot: {}, max_slot: {} (num={}), min_slot: {} (num={})",
+        debug!("total_stores: {}, newest_slot: {}, oldest_slot: {}, max_slot: {} (num={}), min_slot: {} (num={})",
               total_count, newest_slot, oldest_slot, max_slot, max, min_slot, min);
         datapoint_info!(
             "accounts_db-stores",
@@ -4129,6 +4147,7 @@ impl AccountsDB {
             if let Some(ref mut purged_account_slots) = purged_account_slots {
                 purged_account_slots.entry(pubkey).or_default().insert(slot);
             }
+            info!("slot: {} unref: {}", slot, pubkey);
             self.accounts_index.unref_from_storage(&pubkey);
         }
 
@@ -4160,17 +4179,30 @@ impl AccountsDB {
         let mut stores: Vec<Arc<AccountStorageEntry>> = vec![];
         for slot in dead_slots.iter() {
             if let Some(slot_storage) = self.storage.get_slot_stores(*slot) {
+                let ids: Vec<_> = slot_storage
+                    .read()
+                    .unwrap()
+                    .values()
+                    .map(|s| s.append_vec_id())
+                    .collect();
+                info!("clean_dead_stores: slot: {} ids: {:?}", slot, ids);
                 for store in slot_storage.read().unwrap().values() {
                     stores.push(store.clone());
                 }
             }
         }
+        info!("clean_stored_dead_slots: {:?}", dead_slots);
         let purged_slot_pubkeys: HashSet<(Slot, Pubkey)> = {
             self.thread_pool_clean.install(|| {
                 stores
                     .into_par_iter()
                     .map(|store| {
                         let accounts = store.accounts(0);
+                        info!(
+                            " clean: store: {} accounts: {}",
+                            store.append_vec_id(),
+                            accounts.len()
+                        );
                         accounts
                             .into_iter()
                             .map(|account| (store.slot(), account.meta.pubkey))
@@ -4182,6 +4214,7 @@ impl AccountsDB {
                     })
             })
         };
+        info!("clean_stored_dead_slots: {:?}", purged_slot_pubkeys);
         self.finalize_dead_slot_removal(
             dead_slots.iter(),
             purged_slot_pubkeys,
@@ -4403,7 +4436,7 @@ impl AccountsDB {
             None::<StorageFinder>,
             None::<Box<dyn Iterator<Item = u64>>>,
             is_cached_store,
-            false,
+            true, /* reset_accounts */
         );
     }
 
@@ -4654,7 +4687,7 @@ impl AccountsDB {
         roots.sort();
         info!("{}: accounts_index roots: {:?}", label, roots,);
         for (pubkey, account_entry) in self.accounts_index.account_maps.read().unwrap().iter() {
-            info!("  key: {}", pubkey);
+            info!("  key: {} ref_count: {}", pubkey, account_entry.ref_count());
             info!(
                 "      slots: {:?}",
                 *account_entry.slot_list.read().unwrap()
@@ -4666,7 +4699,7 @@ impl AccountsDB {
         let mut slots: Vec<_> = self.storage.all_slots();
         #[allow(clippy::stable_sort_primitive)]
         slots.sort();
-        info!("{}: count_and status for {} slots:", label, slots.len());
+        info!("{}: count_and_status for {} slots:", label, slots.len());
         for slot in &slots {
             let slot_stores = self.storage.get_slot_stores(*slot).unwrap();
             let r_slot_stores = slot_stores.read().unwrap();
@@ -6908,6 +6941,120 @@ pub mod tests {
         assert_load_account(&accounts, current_slot, pubkey, old_lamport);
         assert_load_account(&accounts, current_slot, purged_pubkey1, 0);
         assert_load_account(&accounts, current_slot, purged_pubkey2, 0);
+    }
+
+    fn do_full_clean_refcount(
+        pubkey1: &Pubkey,
+        pubkey2: &Pubkey,
+        dummy_pubkey: &Pubkey,
+        store1_first: bool,
+        data_size: u64,
+    ) -> AccountsDB {
+        let old_lamport = 223;
+        let zero_lamport = 0;
+        let no_data = 2200;
+        let dummy_lamport = 999_999;
+        let owner = Account::default().owner;
+
+        let account = Account::new(old_lamport, no_data, &owner);
+        let account2 = Account::new(old_lamport + 100_001, no_data, &owner);
+        let account3 = Account::new(old_lamport + 100_002, no_data, &owner);
+        let account4 = Account::new(old_lamport + 100_003, no_data, &owner);
+        let dummy_account = Account::new(dummy_lamport, no_data, &owner);
+        let zero_lamport_account = Account::new(zero_lamport, no_data, &owner);
+
+        let mut current_slot = 0;
+        let accounts = AccountsDB::new_sized(Vec::new(), data_size);
+
+        // A: Initialize AccountsDB with pubkey1 and pubkey2
+        current_slot += 1;
+        if store1_first {
+            accounts.store_uncached(current_slot, &[(pubkey1, &account)]);
+            accounts.store_uncached(current_slot, &[(pubkey2, &account)]);
+        } else {
+            accounts.store_uncached(current_slot, &[(pubkey2, &account)]);
+            accounts.store_uncached(current_slot, &[(pubkey1, &account)]);
+        }
+        /*accounts.store_uncached(current_slot, &[(&pubkey2, &account4)]);
+        accounts.store_uncached(current_slot, &[(&dummy_pubkey, &dummy_account)]);
+        accounts.store_uncached(current_slot, &[(&dummy_pubkey, &dummy_account)]);
+        accounts.store_uncached(current_slot, &[(&dummy_pubkey, &dummy_account)]);
+        accounts.store_uncached(current_slot, &[(&dummy_pubkey, &dummy_account)]);*/
+        accounts.get_accounts_delta_hash(current_slot);
+        accounts.add_root(current_slot);
+
+        warn!("post A");
+        accounts.print_accounts_stats("Post-A");
+
+        // B: Test multiple updates to pubkey1 in a single slot/storage
+        current_slot += 1;
+        assert_eq!(0, accounts.alive_account_count_in_slot(current_slot));
+        assert_eq!(1, accounts.ref_count_for_pubkey(pubkey1));
+        accounts.store_uncached(current_slot, &[(pubkey1, &account2)]);
+        accounts.store_uncached(current_slot, &[(pubkey1, &account2)]);
+        assert_eq!(1, accounts.alive_account_count_in_slot(current_slot));
+        // Stores to same pubkey, same slot only count once towards the
+        // ref count
+        assert_eq!(2, accounts.ref_count_for_pubkey(pubkey1));
+        accounts.get_accounts_delta_hash(current_slot);
+        accounts.add_root(current_slot);
+
+        accounts.print_accounts_stats("Post-B pre-clean");
+
+        accounts.clean_accounts(None);
+
+        warn!("post B");
+        accounts.print_accounts_stats("Post-B");
+
+        // C: Yet more update to trigger lazy clean of step A
+        current_slot += 1;
+        assert_eq!(2, accounts.ref_count_for_pubkey(pubkey1));
+        accounts.store_uncached(current_slot, &[(pubkey1, &account3)]);
+        accounts.store_uncached(current_slot, &[(pubkey2, &account3)]);
+        accounts.store_uncached(current_slot, &[(dummy_pubkey, &dummy_account)]);
+        assert_eq!(3, accounts.ref_count_for_pubkey(pubkey1));
+        accounts.get_accounts_delta_hash(current_slot);
+        accounts.add_root(current_slot);
+
+        warn!("post C");
+
+        accounts.print_accounts_stats("Post-C");
+        // D: Make pubkey1 0-lamport; also triggers clean of step B
+        current_slot += 1;
+        assert_eq!(3, accounts.ref_count_for_pubkey(pubkey1));
+        accounts.store_uncached(current_slot, &[(pubkey1, &zero_lamport_account)]);
+        accounts.store_uncached(current_slot, &[(pubkey2, &zero_lamport_account)]);
+        accounts.store_uncached(current_slot, &[(dummy_pubkey, &zero_lamport_account)]);
+
+        warn!("post D");
+        accounts.print_accounts_stats("Post-D");
+
+        accounts.get_accounts_delta_hash(current_slot);
+        accounts.add_root(current_slot);
+        accounts.clean_accounts(None);
+
+        accounts.print_accounts_stats("Post-D clean");
+
+        accounts.clean_accounts(None);
+        accounts.print_accounts_stats("Post-D clean2");
+
+        accounts
+    }
+
+    #[test]
+    fn test_full_clean_refcount() {
+        solana_logger::setup();
+        let pubkey1 = Pubkey::from_str("My11111111111111111111111111111111111111111").unwrap();
+        let pubkey2 = Pubkey::from_str("My22211111111111111111111111111111111111111").unwrap();
+        let dummy_pubkey = Pubkey::from_str("My33311111111111111111111111111111111111111").unwrap();
+
+        let db0 = do_full_clean_refcount(&pubkey1, &pubkey2, &dummy_pubkey, false, 4 * 1024 * 1024);
+        let db1 = do_full_clean_refcount(&pubkey1, &pubkey2, &dummy_pubkey, false, 4096);
+        let db2 = do_full_clean_refcount(&pubkey1, &pubkey2, &dummy_pubkey, true, 4096);
+        assert_eq!(
+            db1.ref_count_for_pubkey(&pubkey1),
+            db2.ref_count_for_pubkey(&pubkey1)
+        );
     }
 
     #[test]
