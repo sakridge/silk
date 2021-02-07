@@ -1409,6 +1409,7 @@ impl Blockstore {
         use crate::shred::SHRED_PAYLOAD_SIZE;
         self.data_shred_cf.get_bytes((slot, index)).map(|data| {
             data.and_then(|mut d| {
+                info!("{} {} got bytes:{:?}", slot, index, d);
                 d.resize(cmp::max(d.len(), SHRED_PAYLOAD_SIZE), 0);
                 Some(d)
             })

@@ -675,6 +675,7 @@ mod tests {
 
     /// test window requests respond with the right shred, and do not overrun
     fn run_window_request(slot: Slot, nonce: Nonce) {
+        solana_logger::setup();
         let recycler = PacketsRecycler::default();
         solana_logger::setup();
         let ledger_path = get_tmp_ledger_path!();
@@ -729,6 +730,7 @@ mod tests {
                 .into_iter()
                 .filter_map(|b| {
                     assert_eq!(repair_response::nonce(&b.data[..]).unwrap(), nonce);
+                    info!("data: {:?}", b);
                     Shred::new_from_serialized_shred(b.data.to_vec()).ok()
                 })
                 .collect();

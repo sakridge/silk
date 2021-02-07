@@ -65,9 +65,10 @@ impl fmt::Debug for Packet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Packet {{ size: {:?}, addr: {:?} }}",
+            "Packet {{ size: {:?}, addr: {:?} data: {:?} }}",
             self.meta.size,
-            self.meta.addr()
+            self.meta.addr(),
+            hex::encode(self.data),
         )
     }
 }
