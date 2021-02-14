@@ -18,7 +18,11 @@ pub fn repair_response_packet(
         .expect("Blockstore could not get data shred");
     info!("shred: {:?}", shred);
     shred
-        .map(|shred| repair_response_packet_from_shred(shred, dest, nonce))
+        .map(|shred| {
+            let x = repair_response_packet_from_shred(shred, dest, nonce);
+            info!("{:?}", x);
+            x
+        })
         .unwrap_or(None)
 }
 
@@ -29,6 +33,7 @@ pub fn repair_response_packet_from_shred(
 ) -> Option<Packet> {
     let mut packet = Packet::default();
     packet.meta.size = shred.len() + SIZE_OF_NONCE;
+    info!("sizes: {} {}", packet.meta.size, packet.data.len());
     if packet.meta.size > packet.data.len() {
         return None;
     }

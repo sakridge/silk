@@ -274,6 +274,7 @@ impl Shred {
         // Shreds should be padded out to SHRED_PAYLOAD_SIZE
         // so that erasure generation/recovery works correctly
         // But only the data_header.size is stored in blockstore.
+        info!("resize {} to {}", payload.len(), expected_data_size);
         payload.resize(expected_data_size, 0);
         let shred = if common_header.shred_type == ShredType(CODING_SHRED) {
             let coding_header: CodingShredHeader =
