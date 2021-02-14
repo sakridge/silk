@@ -533,6 +533,7 @@ pub mod test {
 
     #[test]
     fn test_duplicate_retransmit_signal() {
+        solana_logger::setup();
         // Setup
         let ledger_path = get_tmp_ledger_path!();
         let blockstore = Arc::new(Blockstore::open(&ledger_path).unwrap());
