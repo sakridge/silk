@@ -1266,6 +1266,7 @@ impl Blockstore {
         };
 
         if shred.data_header.size == 0 {
+            info!("header is 0?");
             return false;
         }
 

@@ -4,6 +4,7 @@ use super::{
     broadcast_utils::{self, ReceiveResults},
     *,
 };
+use rand::{thread_rng, Rng};
 use crate::broadcast_stage::broadcast_utils::UnfinishedSlotInfo;
 use solana_ledger::{
     entry::Entry,
@@ -193,13 +194,18 @@ impl StandardBroadcastRun {
             (bank.tick_height() % bank.ticks_per_slot()) as u8,
         );
         let is_last_in_slot = last_tick_height == bank.max_tick_height();
-        let data_shreds = self.entries_to_data_shreds(
+        let mut data_shreds = self.entries_to_data_shreds(
             &shredder,
             next_shred_index,
             &receive_results.entries,
             is_last_in_slot,
             &mut process_stats,
         );
+        /*if thread_rng().gen_ratio(1, 100) {
+            let shred_index = thread_rng().gen_range(0, data_shreds.len());
+            let new_size = thread_rng().gen_range(0, std::u16::MAX);
+            data_shreds[shred_index].data_header.size  = new_size;
+        }*/
         // Insert the first shred so blockstore stores that the leader started this block
         // This must be done before the blocks are sent out over the wire.
         if !data_shreds.is_empty() && data_shreds[0].index() == 0 {

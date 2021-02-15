@@ -95,7 +95,9 @@ fn run_check_duplicate(
                 &shred.payload,
                 shred.is_data(),
             ) {
-                cluster_info.push_duplicate_shred(&shred, &existing_shred_payload)?;
+                let e = cluster_info.push_duplicate_shred(&shred, &existing_shred_payload);
+                info!("got duplicate shred?: {} {} {:?}", shred.slot(), shred.index(), e);
+
                 blockstore.store_duplicate_slot(
                     shred.slot(),
                     existing_shred_payload,
@@ -141,12 +143,14 @@ where
         repair_infos.extend(more_repair_infos);
     }
 
+    info!("shreds: {}", shreds.len());
     assert_eq!(shreds.len(), repair_infos.len());
     let mut i = 0;
     shreds.retain(|_shred| (verify_repair(&repair_infos[i]), i += 1).0);
     repair_infos.retain(|repair_info| verify_repair(&repair_info));
     assert_eq!(shreds.len(), repair_infos.len());
 
+    info!("shreds post-repair-check: {}", shreds.len());
     let (completed_data_sets, inserted_indices) = blockstore.insert_shreds_handle_duplicate(
         shreds,
         Some(leader_schedule_cache),
@@ -154,6 +158,7 @@ where
         &handle_duplicate,
         metrics,
     )?;
+    info!("inserted shreds: {}", inserted_indices.len());
     for index in inserted_indices {
         if repair_infos[index].is_some() {
             metrics.num_repair += 1;
@@ -484,6 +489,7 @@ impl WindowService {
                     .unwrap();
                 let mut now = Instant::now();
                 let handle_error = || {
+                    panic!("error?");
                     inc_new_counter_error!("solana-window-error", 1, 1);
                 };
 

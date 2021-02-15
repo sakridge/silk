@@ -1257,7 +1257,7 @@ impl RpcSubscriptions {
 
     fn shutdown(&mut self) -> std::thread::Result<()> {
         if self.t_cleanup.is_some() {
-            info!("RPC Notification thread - shutting down");
+            panic!("RPC Notification thread - shutting down");
             self.exit.store(true, Ordering::Relaxed);
             let x = self.t_cleanup.take().unwrap().join();
             info!("RPC Notification thread - shut down.");

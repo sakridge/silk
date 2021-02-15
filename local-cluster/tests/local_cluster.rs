@@ -126,12 +126,17 @@ fn test_spend_and_verify_all_nodes_2() {
     error!("test_spend_and_verify_all_nodes_2");
     let num_nodes = 2;
     let local = LocalCluster::new_with_equal_stakes(num_nodes, 10_000, 100);
-    cluster_tests::spend_and_verify_all_nodes(
-        &local.entry_point_info,
-        &local.funding_keypair,
-        num_nodes,
-        HashSet::new(),
-    );
+    let validator_keys: Vec<_> = local.validators.keys().cloned().collect();
+    info!("validators: {:?}", validator_keys);
+    for i in 0..100 {
+        error!("spend {}", i);
+        cluster_tests::spend_and_verify_all_nodes(
+            &local.entry_point_info,
+            &local.funding_keypair,
+            num_nodes,
+            HashSet::new(),
+        );
+    }
 }
 
 #[test]
@@ -141,12 +146,15 @@ fn test_spend_and_verify_all_nodes_3() {
     error!("test_spend_and_verify_all_nodes_3");
     let num_nodes = 3;
     let local = LocalCluster::new_with_equal_stakes(num_nodes, 10_000, 100);
-    cluster_tests::spend_and_verify_all_nodes(
-        &local.entry_point_info,
-        &local.funding_keypair,
-        num_nodes,
-        HashSet::new(),
-    );
+    for _i in 0..10 {
+        cluster_tests::spend_and_verify_all_nodes(
+            &local.entry_point_info,
+            &local.funding_keypair,
+            num_nodes,
+            HashSet::new(),
+        );
+        sleep(Duration::from_secs(2));
+    }
 }
 
 #[test]

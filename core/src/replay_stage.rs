@@ -299,6 +299,7 @@ impl ReplayStage {
                     thread_mem_usage::datapoint("solana-replay-stage");
                     // Stop getting entries if we get exit signal
                     if exit.load(Ordering::Relaxed) {
+                        info!("{} exiting", my_pubkey);
                         break;
                     }
 
@@ -306,6 +307,7 @@ impl ReplayStage {
                     let mut generate_new_bank_forks_time =
                         Measure::start("generate_new_bank_forks_time");
                     Self::generate_new_bank_forks(
+                        &my_pubkey,
                         &blockstore,
                         &bank_forks,
                         &leader_schedule_cache,
@@ -415,6 +417,7 @@ impl ReplayStage {
                         reset_bank,
                         heaviest_fork_failures,
                     } = Self::select_vote_and_reset_forks(
+                        &my_pubkey,
                         &heaviest_bank,
                         &heaviest_bank_on_same_voted_fork,
                         &ancestors,
@@ -427,7 +430,8 @@ impl ReplayStage {
                     let mut heaviest_fork_failures_time = Measure::start("heaviest_fork_failures_time");
                     if tower.is_recent(heaviest_bank.slot()) && !heaviest_fork_failures.is_empty() {
                         info!(
-                            "Couldn't vote on heaviest fork: {:?}, heaviest_fork_failures: {:?}",
+                            "{:?}: Couldn't vote on heaviest fork: {:?}, heaviest_fork_failures: {:?}",
+                            my_pubkey,
                             heaviest_bank.slot(),
                             heaviest_fork_failures
                         );
@@ -491,7 +495,8 @@ impl ReplayStage {
                     if let Some(reset_bank) = reset_bank {
                         if last_reset != reset_bank.last_blockhash() {
                             info!(
-                                "vote bank: {:?} reset bank: {:?}",
+                                "{} vote bank: {:?} reset bank: {:?}",
+                                my_pubkey,
                                 vote_bank.as_ref().map(|(b, switch_fork_decision)| (
                                     b.slot(),
                                     switch_fork_decision
@@ -585,6 +590,11 @@ impl ReplayStage {
                     start_leader_time.stop();
                     Self::report_memory(&allocated, "start_leader", start);
 
+                    use rand::{thread_rng, Rng};
+                    //if thread_rng().gen_ratio(1, 20) {
+                    if !poh_recorder.lock().unwrap().has_bank() {
+                        info!("{} bank: {}", my_pubkey, did_complete_bank);
+                    }
                     let mut wait_receive_time = Measure::start("wait_receive_time");
                     if !did_complete_bank {
                         // only wait for the signal if we did not just process a bank; maybe there are more slots available
@@ -593,11 +603,17 @@ impl ReplayStage {
                         let result = ledger_signal_receiver.recv_timeout(timer);
                         match result {
                             Err(RecvTimeoutError::Timeout) => (),
-                            Err(_) => break,
+                            Err(_) => {
+                                info!("{} recv fail, exiting", my_pubkey);
+                                break;
+                            },
                             Ok(_) => trace!("blockstore signal"),
                         };
                     }
                     wait_receive_time.stop();
+                    if !poh_recorder.lock().unwrap().has_bank() {
+                        info!("{} bank: {}", my_pubkey, did_complete_bank);
+                    }
 
                     replay_timing.update(
                         collect_frozen_banks_time.as_us(),
@@ -971,8 +987,8 @@ impl ReplayStage {
             let root_slot = bank_forks.read().unwrap().root();
             datapoint_info!("replay_stage-my_leader_slot", ("slot", poh_slot, i64),);
             info!(
-                "new fork:{} parent:{} (leader) root:{}",
-                poh_slot, parent_slot, root_slot
+                "{} new fork:{} parent:{} (leader) root:{}",
+                my_pubkey, poh_slot, parent_slot, root_slot
             );
 
             let tpu_bank = Self::new_bank_from_parent_with_notify(
@@ -1372,7 +1388,7 @@ impl ReplayStage {
                         bank_progress.replay_progress.num_shreds,
                     );
                     did_complete_bank = true;
-                    info!("bank frozen: {}", bank.slot());
+                    info!("{} bank frozen: {}", my_pubkey, bank.slot());
                     bank.freeze();
                     heaviest_subtree_fork_choice
                         .add_new_leaf_slot(bank.slot(), Some(bank.parent_slot()));
@@ -1567,6 +1583,7 @@ impl ReplayStage {
     // `heaviest_bank_on_same_voted_fork` as the validator's last vote, return
     // a bank to vote on, a bank to reset to,
     pub(crate) fn select_vote_and_reset_forks(
+        my_pubkey: &Pubkey,
         heaviest_bank: &Arc<Bank>,
         heaviest_bank_on_same_voted_fork: &Option<Arc<Bank>>,
         ancestors: &HashMap<u64, HashSet<u64>>,
@@ -1650,7 +1667,7 @@ impl ReplayStage {
                 && propagation_confirmed
                 && switch_fork_decision.can_vote()
             {
-                info!("voting: {} {}", bank.slot(), fork_weight);
+                info!("{} voting: {} {}", my_pubkey, bank.slot(), fork_weight);
                 SelectVoteAndResetForkResult {
                     vote_bank: Some((bank.clone(), switch_fork_decision)),
                     reset_bank: Some(bank.clone()),
@@ -1850,6 +1867,7 @@ impl ReplayStage {
     }
 
     fn generate_new_bank_forks(
+        my_pubkey: &Pubkey,
         blockstore: &Blockstore,
         bank_forks: &RwLock<BankForks>,
         leader_schedule_cache: &Arc<LeaderScheduleCache>,
@@ -1888,7 +1906,8 @@ impl ReplayStage {
                     .slot_leader_at(child_slot, Some(&parent_bank))
                     .unwrap();
                 info!(
-                    "new fork:{} parent:{} root:{}",
+                    "{} new fork:{} parent:{} root:{}",
+                    my_pubkey,
                     child_slot,
                     parent_slot,
                     forks.root()
@@ -2170,6 +2189,7 @@ pub(crate) mod tests {
             .get(NUM_CONSECUTIVE_LEADER_SLOTS)
             .is_none());
         ReplayStage::generate_new_bank_forks(
+            &Pubkey::new_rand(),
             &blockstore,
             &bank_forks,
             &leader_schedule_cache,
