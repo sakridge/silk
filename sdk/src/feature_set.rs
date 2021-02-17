@@ -119,6 +119,10 @@ pub mod per_byte_logging_cost {
     solana_sdk::declare_id!("59dM4SV6dPEKXPfkrkhFkRdn4K6xwKxdNAPMyXG7J1wT");
 }
 
+pub mod check_program_owner {
+    solana_sdk::declare_id!("5XnbR5Es9YXEARRuP6mdvoxiW3hx5atNNeBmwVd8P3QD");
+}
+
 lazy_static! {
     /// Map of feature identifiers to user-visible description
     pub static ref FEATURE_NAMES: HashMap<Pubkey, &'static str> = [
@@ -148,7 +152,8 @@ lazy_static! {
         (full_inflation::mainnet::certusone::enable::id(), "Full inflation enabled by Certus One"),
         (full_inflation::mainnet::certusone::vote::id(), "Community vote allowing Certus One to enable full inflation"),
         (warp_timestamp_again::id(), "warp timestamp again, adjust bounding to 25% fast 80% slow #15204"),
-        (per_byte_logging_cost::id(), "charge the compute budget per byte for logging")
+        (per_byte_logging_cost::id(), "charge the compute budget per byte for logging"),
+        (check_program_owner::id(), "limit programs to operating on accounts owned by itself")
         /*************** ADD NEW FEATURES HERE ***************/
     ]
     .iter()

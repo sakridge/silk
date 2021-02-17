@@ -7,6 +7,7 @@ use chrono::prelude::*;
 use solana_config_program::date_instruction::DateConfig;
 use solana_config_program::get_config_data;
 use solana_sdk::{
+    feature_set,
     account::Account,
     instruction::InstructionError,
     keyed_account::{next_keyed_account, KeyedAccount},
@@ -60,10 +61,14 @@ pub fn process_instruction(
     _program_id: &Pubkey,
     keyed_accounts: &[KeyedAccount],
     data: &[u8],
-    _invoke_context: &mut dyn InvokeContext,
+    invoke_context: &mut dyn InvokeContext,
 ) -> Result<(), InstructionError> {
     let keyed_accounts_iter = &mut keyed_accounts.iter();
     let contract_account = &mut next_keyed_account(keyed_accounts_iter)?.try_account_ref_mut()?;
+    if invoke_context.is_feature_active(&feature_set::check_program_owner::id())
+        && contract_account.owner != crate::id() {
+        return Err(InstructionError::InvalidAccountOwner);
+    }
 
     let instruction = limited_deserialize(data)?;
 

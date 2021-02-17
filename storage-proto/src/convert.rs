@@ -706,6 +706,9 @@ impl From<TransactionError> for tx_by_addr::TransactionError {
                             InstructionError::AccountNotRentExempt => {
                                 tx_by_addr::InstructionErrorType::AccountNotRentExempt
                             }
+                            InstructionError::InvalidAccountOwner => {
+                                tx_by_addr::InstructionErrorType::InvalidAccountOwner
+                            }
                         } as i32,
                         custom: match instruction_error {
                             InstructionError::Custom(custom) => {
