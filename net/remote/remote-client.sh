@@ -11,7 +11,8 @@ if [[ -n $4 ]]; then
 fi
 benchTpsExtraArgs="$5"
 benchExchangeExtraArgs="$6"
-clientIndex="$7"
+accountsBenchExtraArgs="$7"
+clientIndex="$8"
 
 missing() {
   echo "Error: $1 not specified"
@@ -55,6 +56,14 @@ solana-bench-tps)
       --threads $threadCount \
       $benchTpsExtraArgs \
       --read-client-keys ./client-accounts.yml \
+  "
+  ;;
+solana-accounts-cluster-bench)
+  clientCommand="\
+    solana-accounts-cluster-bench \
+      --entrypoint $entrypointIp:8001 \
+      --faucet $entrypointIp:9900 \
+      $accountsBenchExtraArgs \
   "
   ;;
 solana-bench-exchange)

@@ -84,6 +84,7 @@ else
     solana
     solana-bench-exchange
     solana-bench-tps
+    solana-accounts-cluster-bench
     solana-dos
     solana-faucet
     solana-gossip

@@ -389,7 +389,7 @@ startClient() {
     startCommon "$ipAddress"
     ssh "${sshOptions[@]}" -f "$ipAddress" \
       "./solana/net/remote/remote-client.sh $deployMethod $entrypointIp \
-      $clientToRun \"$RUST_LOG\" \"$benchTpsExtraArgs\" \"$benchExchangeExtraArgs\" $clientIndex"
+      $clientToRun \"$RUST_LOG\" \"$benchTpsExtraArgs\" \"$benchExchangeExtraArgs\" \"$accountsBenchExtraArgs\" $clientIndex"
   ) >> "$logFile" 2>&1 || {
     cat "$logFile"
     echo "^^^ +++"
@@ -398,14 +398,17 @@ startClient() {
 }
 
 startClients() {
-  for ((i=0; i < "$numClients" && i < "$numClientsRequested"; i++)) do
-    if [[ $i -lt "$numBenchTpsClients" ]]; then
-      startClient "${clientIpList[$i]}" "solana-bench-tps" "$i"
-    elif [[ $i -lt $((numBenchTpsClients + numBenchExchangeClients)) ]]; then
-      startClient "${clientIpList[$i]}" "solana-bench-exchange" $((i-numBenchTpsClients))
-    else
+  for ((i=0; i < "$numBenchTpsClients"; i++)) do
+    startClient "${clientIpList[$i]}" "solana-bench-tps" "$i"
+  done
+  for ((i=0; i < "$numBenchExchangeClients"; i++)) do
+    startClient "${clientIpList[$i]}" "solana-bench-exchange" "$i"
+  done
+  for ((i=0; i < "$numAccountsBenchClients"; i++)) do
+      startClient "${clientIpList[$i]}" "solana-accounts-cluster-bench" "$i"
+  done
+  for ((i=0; i < "$numIdleClients"; i++)) do
       startClient "${clientIpList[$i]}" "idle"
-    fi
   done
 }
 
@@ -746,6 +749,7 @@ skipSetup=false
 updatePlatforms=
 nodeAddress=
 numIdleClients=0
+numAccoutsBenchClients=0
 numBenchTpsClients=0
 numBenchExchangeClients=0
 benchTpsExtraArgs=
@@ -958,6 +962,10 @@ while getopts "h?T:t:o:f:rc:Fn:i:d" opt "${shortArgs[@]}"; do
           numBenchExchangeClients=$numClients
           benchExchangeExtraArgs=$extraArgs
         ;;
+        accounts-cluster-bench)
+          numAccountsBenchClients=$numClients
+          accountsBenchExtraArgs=$extraArgs
+        ;;
         *)
           echo "Unknown client type: $clientType"
           exit 1
@@ -990,10 +998,11 @@ if [[ -n $numValidatorsRequested ]]; then
 fi
 
 numClients=${#clientIpList[@]}
-numClientsRequested=$((numBenchTpsClients + numBenchExchangeClients + numIdleClients))
+numClientsRequested=$((numBenchTpsClients + numBenchExchangeClients + numIdleClients + numAccountsBenchClients))
 if [[ "$numClientsRequested" -eq 0 ]]; then
   numBenchTpsClients=$numClients
   numClientsRequested=$numClients
+  numAccountsBenchClients=$numClients
 else
   if [[ "$numClientsRequested" -gt "$numClients" ]]; then
     echo "Error: More clients requested ($numClientsRequested) then available ($numClients)"
