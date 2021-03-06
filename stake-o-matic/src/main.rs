@@ -240,7 +240,7 @@ impl Config {
             dry_run: true,
             baseline_stake_amount: 25_000,
             bonus_stake_amount: 175_000,
-            quality_block_producer_percentage: 15,
+            quality_block_producer_percentage: 25,
             delinquent_grace_slot_distance: 21_600,
             max_poor_block_producer_percentage: 20,
             max_commission: 100,
@@ -337,7 +337,7 @@ fn get_config() -> Config {
                 .long("quality-block-producer-percentage")
                 .value_name("PERCENTAGE")
                 .takes_value(true)
-                .default_value("15")
+                .default_value("25")
                 .validator(is_valid_percentage)
                 .help("Quality validators have a skip rate within this percentage of the cluster average in the previous epoch.")
         )
