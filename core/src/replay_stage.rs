@@ -34,7 +34,7 @@ use solana_ledger::{
     entry::VerifyRecyclers,
     leader_schedule_cache::LeaderScheduleCache,
 };
-use solana_measure::{measure::Measure, thread_mem_usage};
+use solana_measure::{measure::Measure};
 use solana_metrics::inc_new_counter_info;
 use solana_runtime::{
     accounts_background_service::AbsRequestSender, bank::Bank, bank_forks::BankForks,
@@ -345,15 +345,11 @@ impl ReplayStage {
                     last_print_time: Instant::now(),
                 };
                 loop {
-                    let allocated = thread_mem_usage::Allocatedp::default();
-
-                    thread_mem_usage::datapoint("solana-replay-stage");
                     // Stop getting entries if we get exit signal
                     if exit.load(Ordering::Relaxed) {
                         break;
                     }
 
-                    let start = allocated.get();
                     let mut generate_new_bank_forks_time =
                         Measure::start("generate_new_bank_forks_time");
                     Self::generate_new_bank_forks(
@@ -364,11 +360,9 @@ impl ReplayStage {
                         &mut progress,
                     );
                     generate_new_bank_forks_time.stop();
-                    Self::report_memory(&allocated, "generate_new_bank_forks", start);
 
                     let mut tpu_has_bank = poh_recorder.lock().unwrap().has_bank();
 
-                    let start = allocated.get();
                     let mut replay_active_banks_time = Measure::start("replay_active_banks_time");
                     let ancestors = bank_forks.read().unwrap().ancestors();
                     let descendants = bank_forks.read().unwrap().descendants().clone();
@@ -393,10 +387,8 @@ impl ReplayStage {
                         &mut latest_validator_votes_for_frozen_banks,
                     );
                     replay_active_banks_time.stop();
-                    Self::report_memory(&allocated, "replay_active_banks", start);
 
                     let forks_root = bank_forks.read().unwrap().root();
-                    let start = allocated.get();
 
                     // Reset any duplicate slots that have been confirmed
                     // by the network in anticipation of the confirmed version of
@@ -499,7 +491,6 @@ impl ReplayStage {
                     let (heaviest_bank, heaviest_bank_on_same_voted_fork) = heaviest_subtree_fork_choice
                         .select_forks(&frozen_banks, &tower, &progress, &ancestors, &bank_forks);
                     select_forks_time.stop();
-                    Self::report_memory(&allocated, "select_fork", start);
 
                     if let Some(heaviest_bank_on_same_voted_fork) = heaviest_bank_on_same_voted_fork.as_ref() {
                         if let Some(my_latest_landed_vote) = progress.my_latest_landed_vote(heaviest_bank_on_same_voted_fork.slot()) {
@@ -543,8 +534,6 @@ impl ReplayStage {
                     }
                     heaviest_fork_failures_time.stop();
 
-                    let start = allocated.get();
-
                     let mut voting_time = Measure::start("voting_time");
                     // Vote on a fork
                     if let Some((ref vote_bank, ref switch_fork_decision)) = vote_bank {
@@ -585,9 +574,6 @@ impl ReplayStage {
                         );
                     };
                     voting_time.stop();
-
-                    Self::report_memory(&allocated, "votable_bank", start);
-                    let start = allocated.get();
 
                     let mut reset_bank_time = Measure::start("reset_bank");
                     // Reset onto a fork
@@ -656,12 +642,9 @@ impl ReplayStage {
                                 }
                             }
                         }
-                        Self::report_memory(&allocated, "reset_bank", start);
                     }
                     reset_bank_time.stop();
-                    Self::report_memory(&allocated, "reset_bank", start);
 
-                    let start = allocated.get();
                     let mut start_leader_time = Measure::start("start_leader_time");
                     if !tpu_has_bank {
                         Self::maybe_start_leader(
@@ -687,7 +670,6 @@ impl ReplayStage {
                         }
                     }
                     start_leader_time.stop();
-                    Self::report_memory(&allocated, "start_leader", start);
 
                     let mut wait_receive_time = Measure::start("wait_receive_time");
                     if !did_complete_bank {
@@ -801,17 +783,6 @@ impl ReplayStage {
         );
 
         (progress, heaviest_subtree_fork_choice)
-    }
-
-    fn report_memory(
-        allocated: &solana_measure::thread_mem_usage::Allocatedp,
-        name: &'static str,
-        start: u64,
-    ) {
-        datapoint_debug!(
-            "replay_stage-memory",
-            (name, (allocated.get() - start) as i64, i64),
-        );
     }
 
     #[allow(dead_code)]
