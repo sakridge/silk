@@ -4,10 +4,10 @@ use crate::{
         self, BlockstoreProcessorError, BlockstoreProcessorResult, CacheBlockMetaSender,
         ProcessOptions, TransactionStatusSender,
     },
-    entry::VerifyRecyclers,
     leader_schedule_cache::LeaderScheduleCache,
 };
 use log::*;
+use solana_entry::entry::VerifyRecyclers;
 use solana_runtime::{
     bank_forks::{ArchiveFormat, BankForks, SnapshotConfig},
     snapshot_utils,

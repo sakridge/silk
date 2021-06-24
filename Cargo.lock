@@ -4640,6 +4640,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "solana-entry"
+version = "1.8.0"
+dependencies = [
+ "bincode",
+ "dlopen",
+ "dlopen_derive",
+ "log 0.4.11",
+ "matches",
+ "rand 0.7.3",
+ "rayon",
+ "serde",
+ "solana-logger 1.8.0",
+ "solana-measure",
+ "solana-merkle-tree",
+ "solana-metrics",
+ "solana-perf",
+ "solana-rayon-threadlimit",
+ "solana-sdk",
+]
+
+[[package]]
 name = "solana-exchange-program"
 version = "1.8.0"
 dependencies = [
@@ -4902,6 +4923,7 @@ dependencies = [
  "sha2 0.9.5",
  "solana-account-decoder",
  "solana-bpf-loader-program",
+ "solana-entry",
  "solana-frozen-abi 1.8.0",
  "solana-frozen-abi-macro 1.8.0",
  "solana-logger 1.8.0",
@@ -5028,7 +5050,6 @@ name = "solana-measure"
 version = "1.8.0"
 dependencies = [
  "log 0.4.11",
- "solana-metrics",
  "solana-sdk",
 ]
 
@@ -5181,7 +5202,7 @@ dependencies = [
  "rand 0.7.3",
  "rayon",
  "solana-clap-utils",
- "solana-ledger",
+ "solana-entry",
  "solana-logger 1.8.0",
  "solana-measure",
  "solana-perf",

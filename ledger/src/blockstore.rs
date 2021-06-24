@@ -8,7 +8,6 @@ use crate::{
         IteratorMode, LedgerColumn, Result, WriteBatch,
     },
     blockstore_meta::*,
-    entry::{create_ticks, Entry},
     erasure::ErasureConfig,
     leader_schedule_cache::LeaderScheduleCache,
     next_slots_iterator::NextSlotsIterator,
@@ -22,6 +21,7 @@ use rayon::{
     ThreadPool,
 };
 use rocksdb::DBRawIterator;
+use solana_entry::entry::{create_ticks, Entry};
 use solana_measure::measure::Measure;
 use solana_metrics::{datapoint_debug, datapoint_error};
 use solana_rayon_threadlimit::get_thread_count;
